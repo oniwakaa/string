@@ -1,0 +1,6 @@
+[submodule "MemOS"]
+	path = MemOS
+	url = https://github.com/MemTensor/MemOS.git
+[submodule "llama.cpp"]
+	path = llama.cpp
+	url = https://github.com/ggerganov/llama.cpp.git

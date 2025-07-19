@@ -1,0 +1,42 @@
+# Backup directories
+MemOS_backup/
+llama.cpp_backup/
+
+# System files
+.DS_Store
+.env
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Virtual environment
+venv/
+
+# IDE/Editor files
+.cursor/
+.vscode/
+.idea/
+
+# Memory service data
+.memos/
+
+# OS generated files
+Thumbs.db
+.DS_Store?
+ehthumbs.db
+Icon?
+
+# Temporary files
+*.tmp
+*.temp
+*.log
+
+# Build artifacts
+*.o
+*.so
+*.dylib
+build/
+dist/ 
