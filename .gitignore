@@ -39,4 +39,26 @@ Icon?
 *.so
 *.dylib
 build/
-dist/ 
+dist/
+
+# Model files and directories
+smollm/
+smollm-quantized/
+*.gguf
+*.safetensors
+*.bin
+*.pt
+*.pth
+*.onnx
+*.onnx_data
+*.h5
+*.tflite
+*.pb
+
+# Model-related files
+model*/
+models/
+checkpoints/
+weights/
+*.model
+*.weights

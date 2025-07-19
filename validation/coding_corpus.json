@@ -1,0 +1,72 @@
+[
+  {
+    "id": "function_generation_001",
+    "category": "function_generation",
+    "prompt": "Write a Python function named calculate_factorial that takes an integer n and returns its factorial. Include a docstring with parameter and return value descriptions.",
+    "expected_themes": ["function_definition", "recursion_or_iteration", "docstring", "edge_cases"],
+    "complexity": "basic"
+  },
+  {
+    "id": "code_completion_001", 
+    "category": "code_completion",
+    "prompt": "Complete the following Python class method get_full_name:\n\nclass User:\n    def __init__(self, first_name, last_name):\n        self.first_name = first_name\n        self.last_name = last_name\n\n    def get_full_name(self):\n        # TODO: Complete this method",
+    "expected_themes": ["method_completion", "string_concatenation", "class_methods"],
+    "complexity": "basic"
+  },
+  {
+    "id": "docstring_generation_001",
+    "category": "docstring_generation", 
+    "prompt": "Add a PEP 257 compliant docstring to the following Python function:\n\ndef is_prime(n):\n    if n <= 1:\n        return False\n    for i in range(2, int(n**0.5) + 1):\n        if n % i == 0:\n            return False\n    return True",
+    "expected_themes": ["docstring", "PEP_257", "parameter_description", "return_description"],
+    "complexity": "basic"
+  },
+  {
+    "id": "refactoring_001",
+    "category": "simple_refactoring",
+    "prompt": "Refactor the following Python code to use a list comprehension:\n\nsquares = []\nfor i in range(10):\n    squares.append(i*i)",
+    "expected_themes": ["list_comprehension", "code_optimization", "pythonic_style"],
+    "complexity": "basic"
+  },
+  {
+    "id": "bug_detection_001",
+    "category": "bug_detection",
+    "prompt": "Identify and fix the bug in this Python function:\n\ndef find_item(items, target):\n    for item in items:\n        if item = target:  # Bug is here\n            return True\n    return False",
+    "expected_themes": ["syntax_error", "assignment_vs_comparison", "debugging"],
+    "complexity": "basic"
+  },
+  {
+    "id": "algorithm_implementation_001",
+    "category": "algorithm_implementation",
+    "prompt": "Implement a Python function called binary_search that takes a sorted list and a target value, then returns the index of the target or -1 if not found. Include proper error handling and a comprehensive docstring.",
+    "expected_themes": ["binary_search", "algorithm", "error_handling", "docstring"],
+    "complexity": "intermediate"
+  },
+  {
+    "id": "data_structure_001",
+    "category": "data_structure_implementation", 
+    "prompt": "Create a Python class called Stack that implements a basic stack data structure with push, pop, peek, and is_empty methods. Include type hints and proper error handling for empty stack operations.",
+    "expected_themes": ["class_definition", "data_structures", "type_hints", "error_handling"],
+    "complexity": "intermediate"
+  },
+  {
+    "id": "string_processing_001",
+    "category": "string_processing",
+    "prompt": "Write a Python function called validate_email that takes a string and returns True if it's a valid email format, False otherwise. Use regular expressions and handle edge cases like empty strings.",
+    "expected_themes": ["regex", "string_validation", "edge_cases", "email_format"],
+    "complexity": "intermediate"
+  },
+  {
+    "id": "file_operations_001",
+    "category": "file_operations",
+    "prompt": "Create a Python function called read_csv_safely that reads a CSV file and returns its contents as a list of dictionaries. Include proper exception handling for file not found, permission errors, and malformed CSV data.",
+    "expected_themes": ["file_io", "csv_processing", "exception_handling", "error_recovery"],
+    "complexity": "intermediate"
+  },
+  {
+    "id": "async_programming_001",
+    "category": "async_programming",
+    "prompt": "Write an async Python function called fetch_urls that takes a list of URLs and returns their HTTP status codes concurrently. Use aiohttp and include proper error handling for network timeouts and invalid URLs.",
+    "expected_themes": ["async_await", "concurrency", "http_requests", "error_handling"],
+    "complexity": "advanced"
+  }
+] 
