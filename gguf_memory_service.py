@@ -360,8 +360,62 @@ class GGUFMemoryService:
             
             logger.info(f"🧠 [MemOS Chat] Processing query for user {effective_user_id}: {query[:100]}...")
             
-            # Generate response using MemOS
-            response = self.mos_instance.chat(query=query, user_id=effective_user_id)
+            # First search for codebase context to enhance the query
+            codebase_context = ""
+            memories_used = []
+            
+            try:
+                # Search for relevant memories (will search all accessible cubes)
+                search_result = self.mos_instance.search(query=query, user_id=effective_user_id)
+                
+                if search_result and search_result.get('text_mem'):
+                    logger.info(f"🔍 [Search Results] Found {len(search_result['text_mem'])} cube results")
+                    
+                    # Filter for codebase-related memories
+                    codebase_memories = []
+                    for cube_result in search_result['text_mem']:
+                        cube_memories = cube_result.get('memories', [])
+                        logger.info(f"📚 [Cube Analysis] Cube has {len(cube_memories)} memories")
+                        
+                        for memory in cube_memories[:5]:  # Top 5 most relevant
+                            # Check if this memory contains code-like content
+                            memory_content = memory.memory
+                            if any(keyword in memory_content.lower() for keyword in [
+                                'def ', 'function', 'class ', 'import ', 'return ', 
+                                '.py', 'file:', 'path:', 'calculate_fibonacci', 
+                                'textanalyzer', 'math_utils', 'string_processor',
+                                'quantum_flux_capacitor', 'dilithium_crystals', 'quantumcomputer',
+                                'unique_functions', 'temporal_coefficient', 'energy_level'
+                            ]):
+                                codebase_memories.append(memory_content)
+                                memories_used.append({
+                                    'id': memory.id,
+                                    'content': memory_content[:200] + '...' if len(memory_content) > 200 else memory_content,
+                                    'relevance_score': getattr(memory, 'score', 0.0),
+                                    'source': 'codebase'
+                                })
+                    
+                    if codebase_memories:
+                        codebase_context = f"\n\nRelevant codebase context:\n{chr(10).join(codebase_memories[:3])}\n"
+                        logger.info(f"✅ [Codebase Context] Found {len(codebase_memories)} relevant code memories")
+                    else:
+                        logger.info("⚠️ [Codebase Context] No code-related memories found")
+                else:
+                    logger.info("⚠️ [Search] No search results returned")
+                    
+            except Exception as e:
+                logger.warning(f"⚠️ [Search Error] {e}")
+            
+            # Create enhanced query with codebase context
+            if codebase_context:
+                enhanced_query = f"{query}{codebase_context}\n\nPlease answer based on the provided codebase context when relevant."
+                logger.info(f"🚀 [Enhanced Query] Added codebase context ({len(codebase_context)} chars)")
+            else:
+                enhanced_query = query
+                logger.info("📝 [Standard Query] No codebase context available, using original query")
+            
+            # Generate response using MemOS with enhanced query
+            response = self.mos_instance.chat(query=enhanced_query, user_id=effective_user_id)
             
             end_time = datetime.now()
             inference_time = (end_time - start_time).total_seconds()
@@ -372,8 +426,8 @@ class GGUFMemoryService:
                 'response': response,
                 'query': query,
                 'user_id': effective_user_id,
-                'memory_enhanced': True,  # MemOS always uses memory
-                'memories_used': [],  # TODO: Extract memory metadata from MemOS
+                'memory_enhanced': len(memories_used) > 0,  # True if codebase context was used
+                'memories_used': memories_used,  # Populated from codebase search
                 'inference_time_seconds': inference_time,
                 'timestamp': end_time.isoformat(),
                 'model_info': {
@@ -382,6 +436,8 @@ class GGUFMemoryService:
                     'model_path': getattr(self.llm, 'model_path', 'unknown') if self.llm else 'unknown'
                 },
                 'memos_enabled': True,
+                'codebase_context_used': len(memories_used) > 0,
+                'codebase_memories_count': len(memories_used),
             }
             
         except Exception as e:

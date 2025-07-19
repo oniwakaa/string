@@ -120,6 +120,31 @@ class ServiceStatusResponse(BaseModel):
     config: Dict[str, Any] = Field(..., description="Configuration")
 
 
+class LoadCodebaseRequest(BaseModel):
+    """Request model for load codebase endpoint."""
+    directory_path: str = Field(..., description="Path to the directory containing code files")
+    user_id: Optional[str] = Field(None, description="User ID for memory context")
+    file_extensions: Optional[list[str]] = Field(None, description="File extensions to include (default: common code extensions)")
+    exclude_dirs: Optional[list[str]] = Field(None, description="Directory names to exclude (default: common excluded dirs)")
+
+
+class LoadCodebaseResponse(BaseModel):
+    """Response model for load codebase endpoint."""
+    status: str = Field(..., description="Status of the loading operation")
+    directory_path: str = Field(..., description="Path that was processed")
+    user_id: str = Field(..., description="User ID used for memory context")
+    files_loaded: int = Field(..., description="Number of files successfully loaded")
+    files_skipped: int = Field(..., description="Number of files skipped")
+    total_size_bytes: int = Field(..., description="Total size in bytes of processed files")
+    loading_time_seconds: float = Field(..., description="Time taken for loading")
+    timestamp: str = Field(..., description="Processing timestamp")
+    loaded_files: list[Dict[str, Any]] = Field(..., description="Details of loaded files (first 100)")
+    skipped_files: list[Dict[str, Any]] = Field(..., description="Details of skipped files (first 50)")
+    file_extensions_processed: list[str] = Field(..., description="File extensions that were processed")
+    excluded_directories: list[str] = Field(..., description="Directories that were excluded")
+    error: Optional[str] = Field(None, description="Error message if status is 'error'")
+
+
 # API Endpoints
 
 @app.post("/chat", response_model=ChatResponse, summary="Memory-aware chat with MemOS")
@@ -227,6 +252,50 @@ async def get_service_status():
         raise HTTPException(status_code=500, detail=f"Failed to get service status: {str(e)}")
 
 
+@app.post("/load_codebase", response_model=LoadCodebaseResponse, summary="Load codebase into MemOS for retrieval")
+async def load_codebase(request: LoadCodebaseRequest):
+    """
+    Load a directory of code files into MemOS for enhanced code retrieval.
+    
+    This endpoint:
+    1. Walks through the specified directory
+    2. Reads all code files (filtered by extension)
+    3. Processes and chunks the code using MemOS
+    4. Stores embeddings in the Qdrant vector database
+    5. Makes the code searchable for future chat queries
+    
+    The loaded code will be automatically retrieved and included in chat responses
+    when relevant to user queries.
+    """
+    global service
+    
+    if not service or not service.is_healthy():
+        raise HTTPException(status_code=503, detail="Service not available or unhealthy")
+    
+    try:
+        result = await service.load_codebase(
+            directory_path=request.directory_path,
+            user_id=request.user_id,
+            file_extensions=request.file_extensions,
+            exclude_dirs=request.exclude_dirs
+        )
+        
+        return LoadCodebaseResponse(**result)
+        
+    except ValueError as e:
+        # Client error (e.g., invalid directory path)
+        logger.error(f"Load codebase validation error: {e}")
+        raise HTTPException(status_code=400, detail=str(e))
+    except RuntimeError as e:
+        # Service error (e.g., MemOS not available)
+        logger.error(f"Load codebase runtime error: {e}")
+        raise HTTPException(status_code=503, detail=str(e))
+    except Exception as e:
+        # Unexpected error
+        logger.error(f"Load codebase unexpected error: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to load codebase: {str(e)}")
+
+
 @app.get("/", summary="Service information")
 async def root():
     """
@@ -238,6 +307,7 @@ async def root():
         "version": api_config.get('version', '1.0.0'),
         "endpoints": {
             "chat": "/chat",
+            "load_codebase": "/load_codebase",
             "health": "/health",
             "status": "/status",
             "docs": "/docs"
