@@ -1,0 +1,6 @@
+# Test file created by SecureToolbox
+def hello_world():
+    print("Hello from secure toolbox!")
+
+if __name__ == "__main__":
+    hello_world()

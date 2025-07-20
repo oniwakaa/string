@@ -1,0 +1,58 @@
+{
+  "model_schema": "memos.configs.mem_cube.GeneralMemCubeConfig",
+  "config_filename": "config.json",
+  "user_id": "alice",
+  "cube_id": "alice_project_a_codebase_cube",
+  "text_mem": {
+    "backend": "general_text",
+    "config": {
+      "cube_id": null,
+      "memory_filename": "textual_memory.json",
+      "extractor_llm": {
+        "backend": "openai",
+        "config": {
+          "model_name_or_path": "gpt-3.5-turbo",
+          "temperature": 0.0,
+          "max_tokens": 8192,
+          "top_p": 0.9,
+          "top_k": 50,
+          "remove_think_prefix": false,
+          "api_key": "fake-api-key",
+          "api_base": "http://localhost:11434/v1",
+          "extra_body": null
+        }
+      },
+      "vector_db": {
+        "backend": "qdrant",
+        "config": {
+          "collection_name": "codebase_alice_project_a_code",
+          "vector_dimension": 384,
+          "distance_metric": "cosine",
+          "host": null,
+          "port": null,
+          "path": "./qdrant_storage/alice_project_a_alice_project_a_codebase_cube"
+        }
+      },
+      "embedder": {
+        "backend": "sentence_transformer",
+        "config": {
+          "model_name_or_path": "all-MiniLM-L6-v2",
+          "embedding_dims": null,
+          "trust_remote_code": true
+        }
+      }
+    }
+  },
+  "act_mem": {
+    "backend": "uninitialized",
+    "config": {
+      "cube_id": null
+    }
+  },
+  "para_mem": {
+    "backend": "uninitialized",
+    "config": {
+      "cube_id": null
+    }
+  }
+}

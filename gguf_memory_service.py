@@ -49,6 +49,14 @@ except ImportError as e:
     logger.warning(f"LlamaCpp wrapper not available: {e}")
     WRAPPER_AVAILABLE = False
 
+# Import project memory manager
+try:
+    from project_memory_manager import ProjectMemoryManager
+    PROJECT_MEMORY_AVAILABLE = True
+except ImportError as e:
+    logger.warning(f"Project memory manager not available: {e}")
+    PROJECT_MEMORY_AVAILABLE = False
+
 
 class GGUFMemoryService:
     """
@@ -69,6 +77,13 @@ class GGUFMemoryService:
         self.llama_wrapper = None  # Our custom LLM wrapper
         self.llm = None  # Direct llama-cpp-python Llama instance
         self._is_initialized = False
+        
+        # Initialize project memory manager
+        self.project_memory_manager = None
+        if PROJECT_MEMORY_AVAILABLE:
+            self.project_memory_manager = ProjectMemoryManager()
+        else:
+            logger.warning("Project memory manager not available")
         
         # Check dependencies
         if not LLAMA_CPP_AVAILABLE:
@@ -275,7 +290,35 @@ class GGUFMemoryService:
             # Replace the chat_llm with our wrapper after initialization
             self.mos_instance.chat_llm = self.llama_wrapper
             
+            # Set up project memory manager with the MemOS instance
+            if self.project_memory_manager:
+                self.project_memory_manager.set_mos_instance(self.mos_instance)
+                logger.info("✅ Project memory manager configured with MemOS instance")
+            
             logger.info("✅ MemOS initialized successfully with LlamaCpp wrapper")
+            
+            # Register existing memory cubes if available
+            try:
+                import os
+                memory_cubes_dir = "./memory_cubes"
+                if os.path.exists(memory_cubes_dir):
+                    for user_dir in os.listdir(memory_cubes_dir):
+                        user_path = os.path.join(memory_cubes_dir, user_dir)
+                        if os.path.isdir(user_path):
+                            for cube_dir in os.listdir(user_path):
+                                cube_path = os.path.join(user_path, cube_dir)
+                                if os.path.isdir(cube_path) and os.path.exists(os.path.join(cube_path, "config.json")):
+                                    try:
+                                        self.mos_instance.register_mem_cube(
+                                            mem_cube_name_or_path=cube_path,
+                                            mem_cube_id=cube_dir,
+                                            user_id=user_dir
+                                        )
+                                        logger.info(f"✅ Registered memory cube: {cube_dir} for user {user_dir}")
+                                    except Exception as e:
+                                        logger.warning(f"⚠️ Failed to register cube {cube_dir}: {e}")
+            except Exception as e:
+                logger.warning(f"⚠️ Error registering memory cubes: {e}")
             
             # Test basic functionality
             try:
@@ -329,15 +372,17 @@ class GGUFMemoryService:
         self,
         query: str,
         user_id: Optional[str] = None,
+        project_id: Optional[str] = None,
         include_memory: bool = True,
         **kwargs
     ) -> Dict[str, Any]:
         """
-        Perform memory-aware chat using MemOS.
+        Perform memory-aware chat using MemOS with project-specific memory isolation.
         
         Args:
             query (str): User query/prompt
             user_id (Optional[str]): User ID for memory retrieval and context
+            project_id (Optional[str]): Project ID for memory isolation (default: "default")
             include_memory (bool): Whether to use memory (always True for MemOS)
             **kwargs: Additional parameters (for compatibility)
             
@@ -355,18 +400,39 @@ class GGUFMemoryService:
         start_time = datetime.now()
         
         try:
-            # Use MemOS for memory-aware chat
+            # Use MemOS for memory-aware chat with project-specific context
             effective_user_id = user_id or self.config.get('memos', {}).get('user_id', 'default_user')
+            effective_project_id = project_id or "default"
             
-            logger.info(f"🧠 [MemOS Chat] Processing query for user {effective_user_id}: {query[:100]}...")
+            logger.info(f"🧠 [MemOS Chat] Processing query for user {effective_user_id}, project {effective_project_id}: {query[:100]}...")
             
             # First search for codebase context to enhance the query
             codebase_context = ""
             memories_used = []
             
             try:
-                # Search for relevant memories (will search all accessible cubes)
-                search_result = self.mos_instance.search(query=query, user_id=effective_user_id)
+                # Use project memory manager for project-specific search if available
+                if self.project_memory_manager:
+                    # Ensure project cube exists and search within project context
+                    project_cube_id = self.project_memory_manager.get_or_create_project_cube(
+                        effective_user_id, effective_project_id
+                    )
+                    if project_cube_id:
+                        # Search specifically within the project's memory cube
+                        search_result = self.mos_instance.search(
+                            query=query, 
+                            user_id=effective_user_id,
+                            install_cube_ids=[project_cube_id]
+                        )
+                        logger.info(f"🔍 [Project Search] Searching project cube: {project_cube_id}")
+                    else:
+                        # Fallback to user-wide search
+                        search_result = self.mos_instance.search(query=query, user_id=effective_user_id)
+                        logger.warning(f"⚠️ [Search Fallback] Project cube creation failed, using user-wide search")
+                else:
+                    # Fallback to original behavior
+                    search_result = self.mos_instance.search(query=query, user_id=effective_user_id)
+                    logger.info(f"🔍 [Legacy Search] Using legacy user-wide search")
                 
                 if search_result and search_result.get('text_mem'):
                     logger.info(f"🔍 [Search Results] Found {len(search_result['text_mem'])} cube results")
@@ -552,6 +618,258 @@ class GGUFMemoryService:
         except Exception as e:
             logger.error(f"Enhanced inference failed: {e}")
             raise
+    
+    async def load_codebase(
+        self,
+        directory_path: str,
+        user_id: Optional[str] = None,
+        project_id: Optional[str] = None,
+        file_extensions: Optional[List[str]] = None,
+        exclude_dirs: Optional[List[str]] = None
+    ) -> Dict[str, Any]:
+        """
+        Load a directory of code files into MemOS for enhanced code retrieval.
+        
+        Args:
+            directory_path (str): Path to the directory containing code files
+            user_id (Optional[str]): User ID for memory context
+            project_id (Optional[str]): Project ID for memory isolation (default: "default")
+            file_extensions (Optional[List[str]]): File extensions to include
+            exclude_dirs (Optional[List[str]]): Directory names to exclude
+            
+        Returns:
+            Dict[str, Any]: Loading operation results
+        """
+        if not self._is_initialized:
+            raise RuntimeError("Service not initialized. Call startup() first.")
+        
+        if not MEMOS_AVAILABLE or not self.mos_instance:
+            raise RuntimeError("MemOS not available - cannot load codebase")
+        
+        start_time = datetime.now()
+        
+        # Default file extensions for code files
+        if file_extensions is None:
+            file_extensions = ['.py', '.js', '.ts', '.jsx', '.tsx', '.java', '.cpp', '.c', '.h', '.hpp', 
+                             '.cs', '.php', '.rb', '.go', '.rs', '.swift', '.kt', '.scala', '.r', '.m', 
+                             '.sql', '.sh', '.bash', '.yaml', '.yml', '.json', '.xml', '.html', '.css', 
+                             '.md', '.txt', '.cfg', '.ini', '.conf']
+        
+        # Default excluded directories
+        if exclude_dirs is None:
+            exclude_dirs = ['node_modules', '.git', '__pycache__', '.pytest_cache', 'venv', 'env', 
+                           '.venv', 'build', 'dist', '.next', '.nuxt', 'target', 'bin', 'obj', 
+                           '.idea', '.vscode', 'coverage', '.coverage', '.nyc_output', 'logs']
+        
+        # Get effective user ID and project ID
+        effective_user_id = user_id or self.config.get('memos', {}).get('user_id', 'default_user')
+        effective_project_id = project_id or "default"
+        
+        # Use project memory manager for project-specific memory isolation
+        try:
+            # Create user if doesn't exist
+            if not self.mos_instance.user_manager.validate_user(effective_user_id):
+                self.mos_instance.create_user(user_id=effective_user_id)
+                logger.info(f"✅ Created user: {effective_user_id}")
+            
+            # Use project memory manager to get or create project-specific cube
+            if self.project_memory_manager:
+                cube_id = self.project_memory_manager.get_or_create_project_cube(
+                    effective_user_id, effective_project_id
+                )
+                if not cube_id:
+                    raise RuntimeError(f"Failed to create project cube for {effective_user_id}:{effective_project_id}")
+                
+                logger.info(f"✅ Using project cube: {cube_id}")
+            else:
+                # Fallback to old behavior if project memory manager not available
+                logger.warning("Project memory manager not available, using legacy cube creation")
+                accessible_cubes = self.mos_instance.user_manager.get_user_cubes(effective_user_id)
+                if not accessible_cubes:
+                    # Create a default memory cube for the user (legacy)
+                    cube_id = f"{effective_user_id}_codebase_cube"
+                    
+                    from memos.configs.mem_cube import GeneralMemCubeConfig
+                    from memos.mem_cube.general import GeneralMemCube
+                    
+                    cube_config = GeneralMemCubeConfig(
+                        user_id=effective_user_id,
+                        cube_id=cube_id,
+                        text_mem={
+                            "backend": "general_text",
+                            "config": {
+                                "embedder": {
+                                    "backend": "sentence_transformer",
+                                    "config": {
+                                        "model_name_or_path": "all-MiniLM-L6-v2",
+                                        "trust_remote_code": True
+                                    }
+                                },
+                                "vector_db": {
+                                    "backend": "qdrant",
+                                    "config": {
+                                        "collection_name": f"codebase_{effective_user_id}_code",
+                                        "vector_dimension": 384,
+                                        "distance_metric": "cosine",
+                                        "host": None,
+                                        "port": None,
+                                        "path": f"./qdrant_storage/{effective_user_id}_{cube_id}"
+                                    }
+                                },
+                                "extractor_llm": {
+                                    "backend": "openai",
+                                    "config": {
+                                        "model_name_or_path": "gpt-3.5-turbo",
+                                        "temperature": 0.0,
+                                        "max_tokens": 8192,
+                                        "api_key": "fake-api-key",
+                                        "api_base": "http://localhost:11434/v1"
+                                    }
+                                }
+                            }
+                        }
+                    )
+                    
+                    mem_cube = GeneralMemCube(cube_config)
+                    cube_path = f"./memory_cubes/{effective_user_id}/{cube_id}"
+                    mem_cube.dump(cube_path)
+                    
+                    self.mos_instance.register_mem_cube(
+                        mem_cube_name_or_path=cube_path,
+                        mem_cube_id=cube_id,
+                        user_id=effective_user_id
+                    )
+                    
+                    logger.info(f"✅ Created and registered legacy memory cube: {cube_id}")
+                else:
+                    cube_id = list(accessible_cubes)[0]  # Use first available cube
+                
+        except Exception as e:
+            logger.warning(f"⚠️ Error setting up user/cube: {e}")
+        
+        # Validate directory path
+        directory_path = os.path.abspath(directory_path)
+        if not os.path.exists(directory_path):
+            raise ValueError(f"Directory does not exist: {directory_path}")
+        
+        if not os.path.isdir(directory_path):
+            raise ValueError(f"Path is not a directory: {directory_path}")
+        
+        logger.info(f"🚀 [Load Codebase] Starting to load codebase from: {directory_path}")
+        logger.info(f"📂 [Load Codebase] User ID: {effective_user_id}")
+        logger.info(f"🏗️ [Load Codebase] Project ID: {effective_project_id}")
+        logger.info(f"🔍 [Load Codebase] Extensions: {file_extensions}")
+        logger.info(f"🚫 [Load Codebase] Excluded dirs: {exclude_dirs}")
+        
+        loaded_files = []
+        skipped_files = []
+        total_size_bytes = 0
+        
+        try:
+            # Walk through the directory structure
+            for root, dirs, files in os.walk(directory_path):
+                # Skip excluded directories
+                dirs[:] = [d for d in dirs if d not in exclude_dirs]
+                
+                for file in files:
+                    file_path = os.path.join(root, file)
+                    relative_path = os.path.relpath(file_path, directory_path)
+                    
+                    # Check file extension
+                    file_ext = os.path.splitext(file)[1].lower()
+                    if file_ext not in file_extensions:
+                        skipped_files.append({
+                            'path': relative_path,
+                            'reason': f'Extension {file_ext} not in allowed list'
+                        })
+                        continue
+                    
+                    try:
+                        # Read file content
+                        with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+                            content = f.read()
+                        
+                        # Skip empty files
+                        if not content.strip():
+                            skipped_files.append({
+                                'path': relative_path,
+                                'reason': 'Empty file'
+                            })
+                            continue
+                        
+                        # Get file size
+                        file_size = len(content.encode('utf-8'))
+                        total_size_bytes += file_size
+                        
+                        # Format content for memory storage
+                        memory_content = f"File: {relative_path}\nPath: {file_path}\nExtension: {file_ext}\nContent:\n{content}"
+                        
+                        # Create memory item
+                        memory_data = {
+                            'memory': memory_content,
+                            'metadata': {
+                                'type': 'codebase',
+                                'file_path': relative_path,
+                                'file_extension': file_ext,
+                                'file_size_bytes': file_size,
+                                'source': 'codebase_loader',
+                                'memory_time': datetime.now().isoformat(),
+                                'updated_at': datetime.now().isoformat(),
+                                'tags': ['code', 'file', file_ext.lstrip('.')],
+                                'entities': [os.path.basename(file_path)],
+                                'visibility': 'private'
+                            }
+                        }
+                        
+                        # Add memory to MemOS (this will create a cube if needed)
+                        self.mos_instance.add(
+                            memory_content=memory_content,
+                            user_id=effective_user_id
+                        )
+                        
+                        loaded_files.append({
+                            'path': relative_path,
+                            'size_bytes': file_size,
+                            'extension': file_ext
+                        })
+                        
+                        logger.debug(f"✅ [Load Codebase] Loaded: {relative_path} ({file_size} bytes)")
+                        
+                    except Exception as e:
+                        logger.warning(f"⚠️ [Load Codebase] Failed to load {relative_path}: {e}")
+                        skipped_files.append({
+                            'path': relative_path,
+                            'reason': f'Read error: {str(e)}'
+                        })
+                        continue
+            
+            end_time = datetime.now()
+            loading_time = (end_time - start_time).total_seconds()
+            
+            logger.info(f"✅ [Load Codebase] Completed successfully!")
+            logger.info(f"📊 [Load Codebase] Files loaded: {len(loaded_files)}")
+            logger.info(f"📊 [Load Codebase] Files skipped: {len(skipped_files)}")
+            logger.info(f"📊 [Load Codebase] Total size: {total_size_bytes:,} bytes")
+            logger.info(f"⏱️ [Load Codebase] Loading time: {loading_time:.2f}s")
+            
+            return {
+                'status': 'success',
+                'directory_path': directory_path,
+                'user_id': effective_user_id,
+                'files_loaded': len(loaded_files),
+                'files_skipped': len(skipped_files),
+                'total_size_bytes': total_size_bytes,
+                'loading_time_seconds': loading_time,
+                'timestamp': end_time.isoformat(),
+                'loaded_files': loaded_files[:100],  # Limit to first 100 for response size
+                'skipped_files': skipped_files[:50],  # Limit to first 50 for response size
+                'file_extensions_processed': file_extensions,
+                'excluded_directories': exclude_dirs
+            }
+            
+        except Exception as e:
+            logger.error(f"❌ [Load Codebase] Failed: {e}")
+            raise RuntimeError(f"Failed to load codebase: {str(e)}")
     
     def get_service_status(self) -> Dict[str, Any]:
         """

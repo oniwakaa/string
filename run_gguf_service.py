@@ -26,6 +26,8 @@ from pydantic import BaseModel, Field
 
 from config_loader import load_config
 from gguf_memory_service import get_service_instance, shutdown_service
+from agents.orchestrator import ProjectManager
+from project_aware_file_monitor import ProjectAwareFileMonitor, WATCHDOG_AVAILABLE
 
 # Configure logging
 logging.basicConfig(
@@ -36,6 +38,8 @@ logger = logging.getLogger(__name__)
 
 # Global service instance
 service = None
+project_manager = None
+file_monitor = None
 
 
 @asynccontextmanager
@@ -43,13 +47,58 @@ async def lifespan(app: FastAPI):
     """
     Manage the lifecycle of the GGUF Memory Service.
     """
-    global service
+    global service, project_manager, file_monitor
     
     try:
         # Startup
         logger.info("Starting GGUF Memory Service...")
         service = await get_service_instance()
         logger.info("GGUF Memory Service started successfully")
+        
+        # Initialize ProjectManager for agentic tasks
+        logger.info("Initializing ProjectManager for agentic workflow...")
+        # Use the same host and port configuration as the service
+        service_host = api_config.get('host', 'localhost')
+        # Convert 0.0.0.0 to localhost for internal calls
+        if service_host == '0.0.0.0':
+            service_host = 'localhost'
+        service_port = api_config.get('port', 8000)
+        project_manager = ProjectManager(service_host, service_port)
+        
+        # Connect the MemOS instance to ProjectManager for dynamic MemCube lifecycle
+        if service and hasattr(service, 'mos'):
+            project_manager.set_mos_instance(service.mos)
+            logger.info("🔗 MemOS instance connected to ProjectManager for dynamic MemCube lifecycle")
+        else:
+            logger.warning("⚠️ MemOS instance not available for ProjectManager")
+        
+        logger.info(f"ProjectManager initialized successfully (service: {service_host}:{service_port})")
+        
+        # Initialize Project-Aware File Monitor
+        if WATCHDOG_AVAILABLE and project_manager and project_manager.project_memory_manager:
+            try:
+                workspace_root = config.get('file_monitor', {}).get('workspace_root', './workspace')
+                debounce_delay = config.get('file_monitor', {}).get('debounce_delay', 0.5)
+                auto_start = config.get('file_monitor', {}).get('auto_start', False)
+                
+                logger.info("Initializing Project-Aware File Monitor...")
+                file_monitor = ProjectAwareFileMonitor(
+                    workspace_root=workspace_root,
+                    project_memory_manager=project_manager.project_memory_manager,
+                    debounce_delay=debounce_delay
+                )
+                
+                if auto_start:
+                    file_monitor.start_monitoring()
+                    logger.info(f"🔍 File monitoring started for workspace: {workspace_root}")
+                else:
+                    logger.info(f"🔍 File monitor ready (manual start) for workspace: {workspace_root}")
+                    
+            except Exception as e:
+                logger.warning(f"⚠️ Could not initialize file monitor: {e}")
+        else:
+            logger.info("⚠️ File monitoring disabled (missing dependencies or configuration)")
+        
         yield
     except Exception as e:
         logger.error(f"Failed to start service: {e}")
@@ -58,6 +107,19 @@ async def lifespan(app: FastAPI):
         # Shutdown
         logger.info("Shutting down GGUF Memory Service...")
         await shutdown_service()
+        
+        # Cleanup File Monitor
+        if file_monitor:
+            logger.info("Stopping Project-Aware File Monitor...")
+            file_monitor.stop_monitoring()
+            file_monitor = None
+        
+        # Cleanup ProjectManager resources
+        if project_manager:
+            logger.info("Cleaning up ProjectManager resources...")
+            await project_manager.cleanup()
+            project_manager = None
+        
         logger.info("GGUF Memory Service shutdown complete")
 
 
@@ -89,6 +151,7 @@ class ChatRequest(BaseModel):
     """Request model for chat endpoint."""
     query: str = Field(..., description="User query/prompt")
     user_id: Optional[str] = Field(None, description="User ID for memory context")
+    project_id: Optional[str] = Field(None, description="Project ID for memory isolation")
     include_memory: bool = Field(True, description="Whether to include memory in response")
     memory_top_k: Optional[int] = Field(None, description="Number of top memories to retrieve")
 
@@ -124,6 +187,7 @@ class LoadCodebaseRequest(BaseModel):
     """Request model for load codebase endpoint."""
     directory_path: str = Field(..., description="Path to the directory containing code files")
     user_id: Optional[str] = Field(None, description="User ID for memory context")
+    project_id: Optional[str] = Field(None, description="Project ID for memory isolation")
     file_extensions: Optional[list[str]] = Field(None, description="File extensions to include (default: common code extensions)")
     exclude_dirs: Optional[list[str]] = Field(None, description="Directory names to exclude (default: common excluded dirs)")
 
@@ -143,6 +207,55 @@ class LoadCodebaseResponse(BaseModel):
     file_extensions_processed: list[str] = Field(..., description="File extensions that were processed")
     excluded_directories: list[str] = Field(..., description="Directories that were excluded")
     error: Optional[str] = Field(None, description="Error message if status is 'error'")
+
+
+class AgentRequest(BaseModel):
+    """Request model for agentic task execution."""
+    prompt: str = Field(..., description="High-level user request for the agentic system")
+    user_id: Optional[str] = Field("default_user", description="User ID for memory context")
+    project_id: Optional[str] = Field("default", description="Project ID for memory isolation")
+
+
+class AgentResponse(BaseModel):
+    """Response model for agentic task execution."""
+    status: str = Field(..., description="Execution status (success/error)")
+    message: str = Field(..., description="Human-readable status message")
+    result: Any = Field(..., description="Final result from the agentic workflow")
+    execution_plan: Optional[list[Dict[str, Any]]] = Field(None, description="Execution plan that was followed")
+    tasks_executed: Optional[int] = Field(None, description="Number of tasks executed")
+    agent_status: Optional[Dict[str, str]] = Field(None, description="Status of all agents")
+
+
+class FileMonitorRequest(BaseModel):
+    """Request model for file monitor operations."""
+    action: str = Field(..., description="Action to perform (start, stop, status, force_sync)")
+    project_id: Optional[str] = Field(None, description="Project ID for force sync operations")
+    user_id: Optional[str] = Field("default_user", description="User ID for force sync operations")
+
+
+class FileMonitorResponse(BaseModel):
+    """Response model for file monitor operations."""
+    status: str = Field(..., description="Operation status (success/error)")
+    message: str = Field(..., description="Human-readable status message")
+    monitor_status: Optional[Dict[str, Any]] = Field(None, description="Current monitor status")
+
+
+class ProjectPreferenceRequest(BaseModel):
+    """Request model for project preference operations."""
+    action: str = Field(..., description="Action to perform (add, get, update, delete, search)")
+    category: Optional[str] = Field(None, description="Preference category (coding_style, architecture, libraries, patterns, project_specific)")
+    key: Optional[str] = Field(None, description="Preference key")
+    value: Optional[Any] = Field(None, description="Preference value")
+    description: Optional[str] = Field(None, description="Optional description of the preference")
+    query: Optional[str] = Field(None, description="Search query for search action")
+
+
+class ProjectPreferenceResponse(BaseModel):
+    """Response model for project preference operations."""
+    status: str = Field(..., description="Operation status (success/error)")
+    message: str = Field(..., description="Human-readable status message")
+    preferences: Optional[Dict[str, Any]] = Field(None, description="Retrieved preferences")
+    search_results: Optional[list[Dict[str, Any]]] = Field(None, description="Search results for preferences")
 
 
 # API Endpoints
@@ -168,6 +281,7 @@ async def chat_with_memory(request: ChatRequest):
         result = await service.memos_chat(
             query=request.query,
             user_id=request.user_id,
+            project_id=request.project_id,
             include_memory=request.include_memory,
             memory_top_k=request.memory_top_k
         )
@@ -276,6 +390,7 @@ async def load_codebase(request: LoadCodebaseRequest):
         result = await service.load_codebase(
             directory_path=request.directory_path,
             user_id=request.user_id,
+            project_id=request.project_id,
             file_extensions=request.file_extensions,
             exclude_dirs=request.exclude_dirs
         )
@@ -296,6 +411,171 @@ async def load_codebase(request: LoadCodebaseRequest):
         raise HTTPException(status_code=500, detail=f"Failed to load codebase: {str(e)}")
 
 
+@app.post("/execute_agentic_task", response_model=AgentResponse, summary="Execute agentic task")
+async def execute_agentic_task(request: AgentRequest):
+    """
+    Execute a high-level task using the multi-agent system.
+    
+    This endpoint receives a natural language prompt and orchestrates
+    multiple specialized agents to complete the task.
+    """
+    global project_manager
+    
+    if not project_manager:
+        raise HTTPException(status_code=503, detail="ProjectManager not initialized")
+    
+    try:
+        # Execute the agentic task with project isolation
+        result = await project_manager.handle_request(
+            user_prompt=request.prompt,
+            user_id=request.user_id,
+            project_id=request.project_id
+        )
+        
+        # Add agent status information
+        result["agent_status"] = project_manager.get_agent_status()
+        
+        return AgentResponse(**result)
+        
+    except Exception as e:
+        logger.error(f"Agentic task execution failed: {e}")
+        return AgentResponse(
+            status="error",
+            message=f"Task execution failed: {str(e)}",
+            result=None
+        )
+
+
+@app.get("/agent_status", summary="Get agent system status")
+async def get_agent_status():
+    """
+    Get the current status of all agents in the system.
+    """
+    global project_manager
+    
+    if not project_manager:
+        raise HTTPException(status_code=503, detail="ProjectManager not initialized")
+    
+    agent_details = {}
+    for role, agent in project_manager.agents.items():
+        agent_info = {
+            "name": agent.name,
+            "status": agent.status,
+            "role": agent.role
+        }
+        
+        # Get specific model info if available
+        if hasattr(agent, 'get_model_info'):
+            agent_info["model_info"] = agent.get_model_info()
+        elif agent.model_identifier:
+            agent_info["model_identifier"] = agent.model_identifier
+        
+        agent_details[role] = agent_info
+    
+    return {
+        "project_manager_initialized": project_manager is not None,
+        "agent_status": project_manager.get_agent_status(),
+        "available_agents": list(project_manager.agents.keys()),
+        "agent_descriptions": {
+            "code_generator": "Generates and modifies code using google/gemma-3n-E4B-it (Q4_1 quantized)",
+            "code_quality_analyzer": "Advanced polyglot code analysis with static linting and qualitative review",
+            "documentation": "Creates comprehensive technical documentation",
+            "codebase_expert": "Queries existing codebase using RAG system (no local model)"
+        },
+        "agent_details": agent_details
+    }
+
+
+@app.post("/file_monitor", response_model=FileMonitorResponse, summary="Manage project-aware file monitoring")
+async def manage_file_monitor(request: FileMonitorRequest):
+    """
+    Manage the project-aware file monitoring system.
+    
+    Supported actions:
+    - start: Start file monitoring
+    - stop: Stop file monitoring  
+    - status: Get current monitoring status
+    - force_sync: Force sync a specific project
+    """
+    global file_monitor
+    
+    try:
+        if request.action == "start":
+            if not file_monitor:
+                raise HTTPException(status_code=503, detail="File monitor not initialized")
+            
+            file_monitor.start_monitoring()
+            monitor_status = file_monitor.get_monitoring_status()
+            
+            return FileMonitorResponse(
+                status="success",
+                message="File monitoring started successfully",
+                monitor_status=monitor_status
+            )
+        
+        elif request.action == "stop":
+            if not file_monitor:
+                raise HTTPException(status_code=503, detail="File monitor not initialized")
+            
+            file_monitor.stop_monitoring()
+            monitor_status = file_monitor.get_monitoring_status()
+            
+            return FileMonitorResponse(
+                status="success", 
+                message="File monitoring stopped successfully",
+                monitor_status=monitor_status
+            )
+        
+        elif request.action == "status":
+            if not file_monitor:
+                return FileMonitorResponse(
+                    status="success",
+                    message="File monitor not initialized",
+                    monitor_status={"initialized": False, "watchdog_available": WATCHDOG_AVAILABLE}
+                )
+            
+            monitor_status = file_monitor.get_monitoring_status()
+            return FileMonitorResponse(
+                status="success",
+                message="File monitor status retrieved",
+                monitor_status=monitor_status
+            )
+        
+        elif request.action == "force_sync":
+            if not file_monitor:
+                raise HTTPException(status_code=503, detail="File monitor not initialized")
+            
+            if not request.project_id:
+                raise HTTPException(status_code=400, detail="project_id required for force_sync")
+            
+            file_monitor.force_sync_project(
+                project_id=request.project_id,
+                user_id=request.user_id
+            )
+            
+            return FileMonitorResponse(
+                status="success",
+                message=f"Force sync completed for project: {request.project_id}",
+                monitor_status=file_monitor.get_monitoring_status()
+            )
+        
+        else:
+            raise HTTPException(
+                status_code=400, 
+                detail=f"Unknown action: {request.action}. Supported: start, stop, status, force_sync"
+            )
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"File monitor operation failed: {e}")
+        return FileMonitorResponse(
+            status="error",
+            message=f"Operation failed: {str(e)}",
+            monitor_status=None
+        )
+
+
 @app.get("/", summary="Service information")
 async def root():
     """
@@ -303,16 +583,162 @@ async def root():
     """
     return {
         "service": "GGUF Memory Service",
-        "description": "Persistent service integrating MemOS memory layer with GGUF models",
+        "description": "Persistent service integrating MemOS memory layer with GGUF models, multi-agent workflow, and project-aware file monitoring",
         "version": api_config.get('version', '1.0.0'),
+        "features": [
+            "SmolLM3-3B quantized model inference",
+            "MemOS memory and RAG system",
+            "Multi-agent task orchestration", 
+            "Per-project memory isolation",
+            "Dynamic MemCube lifecycle management",
+            "Project-aware automatic file monitoring",
+            "Intelligent codebase syncing with debouncing",
+            "Codebase knowledge interface",
+            "Automatic task decomposition"
+        ],
         "endpoints": {
-            "chat": "/chat",
-            "load_codebase": "/load_codebase",
-            "health": "/health",
-            "status": "/status",
-            "docs": "/docs"
+            "chat": "/chat - Direct chat with memory-enhanced model",
+            "load_codebase": "/load_codebase - Load code files into memory system",
+            "execute_agentic_task": "/execute_agentic_task - Execute complex tasks using multiple agents",
+            "agent_status": "/agent_status - Get status of all agents", 
+            "file_monitor": "/file_monitor - Manage project-aware file monitoring",
+            "project_preferences": "/projects/{project_id}/preferences - Manage project-specific preferences",
+            "health": "/health - Service health check",
+            "status": "/status - Detailed service status",
+            "docs": "/docs - API documentation"
+        },
+        "file_monitoring": {
+            "available": WATCHDOG_AVAILABLE,
+            "workspace_configured": file_monitor is not None,
+            "monitoring_active": file_monitor.is_monitoring if file_monitor else False
         }
     }
+
+
+@app.post("/projects/{project_id}/preferences", response_model=ProjectPreferenceResponse, summary="Manage project preferences")
+async def manage_project_preferences(
+    project_id: str,
+    request: ProjectPreferenceRequest,
+    user_id: str = "default_user"
+):
+    """
+    Manage project-specific preferences using Parametric Memory.
+    
+    This endpoint enables:
+    - Adding new preferences for the project
+    - Retrieving existing preferences (all or by category)
+    - Updating existing preferences
+    - Deleting preferences
+    - Searching preferences by query
+    
+    Supported actions:
+    - add: Add a new preference (requires category, key, value)
+    - get: Get preferences (optional category filter)
+    - update: Update existing preference (requires category, key, value)
+    - delete: Delete preference (requires category, key)
+    - search: Search preferences by query (requires query)
+    """
+    global service
+    
+    if not service or not service.project_memory_manager:
+        raise HTTPException(status_code=503, detail="Project memory manager not available")
+    
+    try:
+        pm_manager = service.project_memory_manager
+        
+        if request.action == "add":
+            if not all([request.category, request.key, request.value]):
+                raise HTTPException(
+                    status_code=400, 
+                    detail="Category, key, and value are required for add action"
+                )
+            
+            success = pm_manager.add_project_preference(
+                user_id=user_id,
+                project_id=project_id,
+                category=request.category,
+                key=request.key,
+                value=request.value,
+                description=request.description
+            )
+            
+            if success:
+                return ProjectPreferenceResponse(
+                    status="success",
+                    message=f"Preference {request.category}.{request.key} added successfully"
+                )
+            else:
+                raise HTTPException(status_code=500, detail="Failed to add preference")
+        
+        elif request.action == "get":
+            preferences = pm_manager.get_project_preferences(
+                user_id=user_id,
+                project_id=project_id,
+                category=request.category
+            )
+            
+            return ProjectPreferenceResponse(
+                status="success",
+                message=f"Retrieved preferences for project {project_id}",
+                preferences=preferences
+            )
+        
+        elif request.action == "update":
+            if not all([request.category, request.key, request.value]):
+                raise HTTPException(
+                    status_code=400,
+                    detail="Category, key, and value are required for update action"
+                )
+            
+            success = pm_manager.add_project_preference(
+                user_id=user_id,
+                project_id=project_id,
+                category=request.category,
+                key=request.key,
+                value=request.value,
+                description=request.description
+            )
+            
+            if success:
+                return ProjectPreferenceResponse(
+                    status="success",
+                    message=f"Preference {request.category}.{request.key} updated successfully"
+                )
+            else:
+                raise HTTPException(status_code=500, detail="Failed to update preference")
+        
+        elif request.action == "search":
+            if not request.query:
+                raise HTTPException(status_code=400, detail="Query is required for search action")
+            
+            search_results = pm_manager.search_project_preferences(
+                user_id=user_id,
+                project_id=project_id,
+                query=request.query
+            )
+            
+            return ProjectPreferenceResponse(
+                status="success",
+                message=f"Search completed for query: {request.query}",
+                search_results=search_results
+            )
+        
+        else:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Unknown action: {request.action}. Supported: add, get, update, search"
+            )
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Project preference operation failed: {e}")
+        return ProjectPreferenceResponse(
+            status="error",
+            message=f"Operation failed: {str(e)}",
+            preferences=None,
+            search_results=None
+        )
 
 
 # Error handlers
