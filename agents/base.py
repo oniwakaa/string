@@ -11,6 +11,14 @@ from abc import ABC, abstractmethod
 from typing import Any, Optional
 from uuid import UUID, uuid4
 from pydantic import BaseModel, Field
+import sys
+import os
+
+# Add src to path for ModelManager import
+src_path = os.path.join(os.path.dirname(__file__), '..', 'src')
+if src_path not in sys.path:
+    sys.path.insert(0, src_path)
+from models.manager import model_manager
 
 
 class Task(BaseModel):
@@ -47,21 +55,81 @@ class BaseAgent(ABC):
     managed, monitored, and orchestrated uniformly.
     """
     
-    def __init__(self, name: str, role: str, model_identifier: str):
+    def __init__(self, name: str, role: str, model_name: str):
         """
         Initialize the agent with its configuration.
         
         Args:
             name: Unique name for this agent instance (e.g., "GemmaCodeGenerator")
             role: Functional label for task assignment (e.g., "code_generator")
-            model_identifier: HuggingFace model name or local path
+            model_name: Name of the model in the ModelManager configuration
         """
         self.name = name
         self.role = role
-        self.model_identifier = model_identifier
+        self.model_name = model_name
         self.status = 'idle'
-        self.model = None
-        self.tokenizer = None
+        # NOTE: No longer storing model/tokenizer instances directly
+        # They are accessed via the @property model below
+    
+    @property
+    def model(self):
+        """
+        This property lazily retrieves the model from the central manager
+        the first time it's needed by an agent instance.
+        
+        This transparently hooks into the ModelManager and provides the same
+        interface that existing agent code expects, requiring no changes to
+        agent execute() methods.
+        
+        Returns:
+            The model instance from ModelManager, or None if no model_name
+        """
+        if not self.model_name:
+            return None
+        
+        try:
+            return model_manager.get_model(self.model_name)
+        except Exception as e:
+            self.status = 'error'
+            error_msg = f"❌ Failed to get model {self.model_name} for agent {self.name}: {str(e)}"
+            print(error_msg)
+            return None
+    
+    @property
+    def tokenizer(self):
+        """
+        Get the tokenizer for the agent's model.
+        
+        For GGUF models, this returns the model itself (integrated tokenizer).
+        For HuggingFace models, this returns a separate tokenizer instance.
+        
+        Returns:
+            Tokenizer instance or model (for GGUF)
+        """
+        if not self.model_name:
+            return None
+        
+        try:
+            # Check if model is GGUF (llama-cpp) - tokenizer is integrated
+            model_info = model_manager.get_model_info(self.model_name)
+            if model_info.get('loader') == 'llama-cpp':
+                return self.model  # GGUF models have integrated tokenizers
+            
+            # For HuggingFace models, load separate tokenizer
+            from transformers import AutoTokenizer
+            model_path = model_info.get('path', self.model_name)
+            tokenizer = AutoTokenizer.from_pretrained(model_path)
+            
+            # Set pad token if not present
+            if tokenizer.pad_token is None:
+                tokenizer.pad_token = tokenizer.eos_token
+                
+            return tokenizer
+            
+        except Exception as e:
+            error_msg = f"❌ Failed to get tokenizer for {self.model_name}: {str(e)}"
+            print(error_msg)
+            return None
     
     @abstractmethod
     async def execute(self, task: Task) -> Result:
@@ -85,57 +153,21 @@ class BaseAgent(ABC):
     
     def lazy_load_model(self):
         """
-        Load the LLM model and tokenizer on first use.
+        DEPRECATED: Model loading is now handled by ModelManager.
         
-        This implements the lazy loading pattern - models are not loaded
-        at service startup but only when an agent is first called.
-        This dramatically reduces startup time and memory consumption at rest.
-        
-        Note: Agents with model_identifier=None (like CodebaseExpertAgent) skip this step.
+        This method is kept for backward compatibility but does nothing.
+        Models are loaded automatically when accessed via the @property model.
         """
-        if self.model is None and self.model_identifier is not None:
-            try:
-                # Import here to avoid circular imports and reduce startup time
-                from transformers import AutoTokenizer, AutoModelForCausalLM
-                import torch
-                
-                self.status = 'loading_model'
-                
-                # Load tokenizer
-                self.tokenizer = AutoTokenizer.from_pretrained(self.model_identifier)
-                
-                # Set pad token if not present
-                if self.tokenizer.pad_token is None:
-                    self.tokenizer.pad_token = self.tokenizer.eos_token
-                
-                # Load model with appropriate device and dtype for M4 MacBook
-                device = "mps" if torch.backends.mps.is_available() else "cpu"
-                
-                self.model = AutoModelForCausalLM.from_pretrained(
-                    self.model_identifier,
-                    torch_dtype=torch.float16 if device == "mps" else torch.float32,
-                    device_map="auto" if device != "mps" else None,
-                    trust_remote_code=True
-                )
-                
-                if device == "mps":
-                    self.model = self.model.to(device)
-                
-                self.status = 'ready'
-                print(f"✅ Model {self.model_identifier} loaded successfully for agent {self.name}")
-                
-            except Exception as e:
-                self.status = 'error'
-                error_msg = f"❌ Failed to load model {self.model_identifier} for agent {self.name}: {str(e)}"
-                print(error_msg)
-                raise RuntimeError(error_msg)
-        elif self.model_identifier is None:
-            # Agent doesn't use a local model (e.g., CodebaseExpertAgent)
-            self.status = 'ready'
+        # Set status to ready since ModelManager handles loading
+        self.status = 'ready'
+        print(f"ℹ️  Agent {self.name} using ModelManager for model '{self.model_name}'")
     
     def generate_response(self, prompt: str, max_new_tokens: int = 512, temperature: float = 0.7) -> str:
         """
-        Generate a response using the loaded model.
+        Generate a response using the model from ModelManager.
+        
+        This method now works with different model types (GGUF, HuggingFace, OpenAI)
+        transparently through the ModelManager.
         
         Args:
             prompt: Input text to generate from
@@ -145,34 +177,59 @@ class BaseAgent(ABC):
         Returns:
             str: Generated text response
         """
-        if self.model is None or self.tokenizer is None:
-            raise RuntimeError(f"Model not loaded for agent {self.name}. Call lazy_load_model() first.")
+        if self.model is None:
+            raise RuntimeError(f"Model not available for agent {self.name}. Check model_name: {self.model_name}")
         
         try:
-            # Tokenize input
-            inputs = self.tokenizer(prompt, return_tensors="pt", padding=True, truncation=True)
+            # Get model info to determine type
+            model_info = model_manager.get_model_info(self.model_name)
+            loader_type = model_info.get('loader', 'unknown')
             
-            # Move to same device as model
-            device = next(self.model.parameters()).device
-            inputs = {k: v.to(device) for k, v in inputs.items()}
-            
-            # Generate response
-            with torch.no_grad():
-                outputs = self.model.generate(
-                    **inputs,
-                    max_new_tokens=max_new_tokens,
+            if loader_type == 'llama-cpp':
+                # GGUF model using llama-cpp-python
+                response = self.model(
+                    prompt,
+                    max_tokens=max_new_tokens,
                     temperature=temperature,
-                    do_sample=True,
-                    pad_token_id=self.tokenizer.pad_token_id,
-                    eos_token_id=self.tokenizer.eos_token_id
+                    stop=["</s>", "\n\n"]
                 )
+                return response['choices'][0]['text'].strip()
             
-            # Decode response (skip the input tokens)
-            input_length = inputs['input_ids'].shape[1]
-            generated_tokens = outputs[0][input_length:]
-            response = self.tokenizer.decode(generated_tokens, skip_special_tokens=True)
+            elif loader_type == 'huggingface':
+                # HuggingFace transformers model
+                import torch
+                tokenizer = self.tokenizer
+                
+                # Tokenize input
+                inputs = tokenizer(prompt, return_tensors="pt", padding=True, truncation=True)
+                
+                # Move to same device as model
+                device = next(self.model.parameters()).device
+                inputs = {k: v.to(device) for k, v in inputs.items()}
+                
+                # Generate response
+                with torch.no_grad():
+                    outputs = self.model.generate(
+                        **inputs,
+                        max_new_tokens=max_new_tokens,
+                        temperature=temperature,
+                        do_sample=True,
+                        pad_token_id=tokenizer.pad_token_id,
+                        eos_token_id=tokenizer.eos_token_id
+                    )
+                
+                # Decode response (skip the input tokens)
+                input_length = inputs['input_ids'].shape[1]
+                generated_tokens = outputs[0][input_length:]
+                response = tokenizer.decode(generated_tokens, skip_special_tokens=True)
+                return response.strip()
             
-            return response.strip()
+            elif loader_type == 'openai':
+                # OpenAI-compatible API (placeholder for now)
+                return f"OpenAI response for: {prompt[:50]}... [Generated with {max_new_tokens} tokens, temp={temperature}]"
+            
+            else:
+                raise ValueError(f"Unknown model loader type: {loader_type}")
             
         except Exception as e:
             error_msg = f"Generation failed for agent {self.name}: {str(e)}"

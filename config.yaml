@@ -14,9 +14,9 @@ mem_reader:
   backend: "simple_struct"
   config:
     llm:
-      backend: "huggingface"
+      backend: "gguf"
       config:
-        model_name_or_path: "./smollm"
+        model_name_or_path: "./smollm-quantized/smollm-q4_K_M.gguf"
         max_tokens: 512
         temperature: 0.7
         top_p: 0.9

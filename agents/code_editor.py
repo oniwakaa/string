@@ -8,9 +8,17 @@ for precision, not creativity.
 
 import ast
 import re
+import sys
+import os
 from typing import Any, Dict, Optional
 
 from agents.base import BaseAgent, Task, Result
+
+# Add src to path for ModelManager import
+src_path = os.path.join(os.path.dirname(__file__), '..', 'src')
+if src_path not in sys.path:
+    sys.path.insert(0, src_path)
+from models.manager import model_manager
 
 
 class CodeEditorAgent(BaseAgent):
@@ -30,7 +38,7 @@ class CodeEditorAgent(BaseAgent):
         super().__init__(
             name="SmolLM_CodeEditor",
             role="code_editor",
-            model_identifier="./smollm-quantized/smollm-q4_K_M.gguf"
+            model_name="SmolLM3-3B"
         )
         
         # Configuration for precise editing using llama-cpp-python
@@ -348,15 +356,10 @@ class CodeEditorAgent(BaseAgent):
                 self.status = 'loading_model'
                 print(f"🔄 Loading SmolLM model for {self.name}...")
                 
-                # Verify model file exists
-                if not os.path.exists(self.model_identifier):
-                    raise FileNotFoundError(f"Model file not found: {self.model_identifier}")
-                
-                # Load model with optimizations
-                self.model = Llama(
-                    model_path=self.model_identifier,
-                    **self.llama_config
-                )
+                # Use ModelManager to get shared model instance (no direct loading)
+                self.model = model_manager.get_model(self.model_name)
+                if not self.model:
+                    raise RuntimeError(f"ModelManager failed to load model: {self.model_name}")
                 
                 self.status = 'ready'
                 print(f"✅ SmolLM model loaded successfully for {self.name}")

@@ -1,0 +1,46 @@
+models:
+  SmolLM3-3B:
+    path: "smollm-quantized/smollm-q4_K_M.gguf"
+    loader: "llama-cpp"
+    params:
+      n_ctx: 16384
+      n_gpu_layers: -1
+
+  gemma-3n-E4B-it:
+    path: "models/gemma/google_gemma-3n-E4B-it-Q4_1.gguf"
+    loader: "llama-cpp"
+    params:
+      n_ctx: 8192
+      n_gpu_layers: -1
+      
+  Qwen3-1.7B-GGUF:
+    path: "models/qwen/qwen3-1.7b-q4_k_m.gguf"
+    loader: "llama-cpp"
+    params:
+      n_ctx: 8192
+      n_gpu_layers: -1
+
+  # HuggingFace model for local SmolLM
+  SmolLM3-3B-HF:
+    path: "smollm"
+    loader: "huggingface"
+    params:
+      torch_dtype: "auto"
+      device_map: "auto"
+      trust_remote_code: true
+
+  # GGUF WebSailor model for web research
+  websailor-local:
+    path: "models/websailor/WebSailor-3B.Q4_K_M.gguf"
+    loader: "llama-cpp"
+    params:
+      n_ctx: 8192
+      n_gpu_layers: -1
+
+  # Lightweight GGUF embedding model for KV caching
+  Qwen3-Embedding-0.6B-GGUF:
+    path: "models/Qwen3-Embedding-0.6B-GGUF/Qwen3-Embedding-0.6B-Q8_0.gguf" # Path to the specific GGUF file
+    loader: "llama-cpp"
+    params:
+      n_ctx: 8192      # Context window for the model
+      n_gpu_layers: -1 # Offload fully to GPU

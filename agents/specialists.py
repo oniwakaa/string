@@ -27,7 +27,7 @@ class ToolExecutorAgent(BaseAgent):
     executes the requested tools with the provided arguments.
     
     Key Features:
-    - No LLM dependency (model_identifier = None)
+    - No LLM dependency (model_name = None)
     - Secure tool registry with predefined functions
     - JSON-based command parsing
     - Comprehensive error handling and validation
@@ -45,7 +45,7 @@ class ToolExecutorAgent(BaseAgent):
         super().__init__(
             name="ToolExecutorAgent",
             role="tool_executor",
-            model_identifier=None  # No LLM required
+            model_name=None  # No LLM required
         )
         
         # Initialize secure toolbox

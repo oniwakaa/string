@@ -1,0 +1,7 @@
+{
+  "coding_style.indentation": {
+    "value": "4 spaces",
+    "updated_at": "2025-07-22T22:20:30.018624",
+    "description": "Use 4 spaces for Python indentation"
+  }
+}

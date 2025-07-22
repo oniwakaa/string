@@ -66,9 +66,14 @@ async def lifespan(app: FastAPI):
         project_manager = ProjectManager(service_host, service_port)
         
         # Connect the MemOS instance to ProjectManager for dynamic MemCube lifecycle
-        if service and hasattr(service, 'mos'):
-            project_manager.set_mos_instance(service.mos)
+        if service and hasattr(service, 'mos_instance'):
+            project_manager.set_mos_instance(service.mos_instance)
             logger.info("🔗 MemOS instance connected to ProjectManager for dynamic MemCube lifecycle")
+            
+            # CRITICAL: Set MemOS instance on the service's project memory manager
+            if hasattr(service, 'project_memory_manager') and service.project_memory_manager:
+                service.project_memory_manager.set_mos_instance(service.mos_instance)
+                logger.info("🔗 MemOS instance connected to service's ProjectMemoryManager")
         else:
             logger.warning("⚠️ MemOS instance not available for ProjectManager")
         
@@ -723,10 +728,29 @@ async def manage_project_preferences(
                 search_results=search_results
             )
         
+        elif request.action == "delete":
+            if not request.category or not request.key:
+                raise HTTPException(status_code=400, detail="Category and key are required for delete action")
+            
+            success = pm_manager.delete_project_preference(
+                user_id=user_id,
+                project_id=project_id,
+                category=request.category,
+                key=request.key
+            )
+            
+            if success:
+                return ProjectPreferenceResponse(
+                    status="success",
+                    message=f"Preference {request.category}.{request.key} deleted successfully"
+                )
+            else:
+                raise HTTPException(status_code=500, detail="Failed to delete preference")
+        
         else:
             raise HTTPException(
                 status_code=400,
-                detail=f"Unknown action: {request.action}. Supported: add, get, update, search"
+                detail=f"Unknown action: {request.action}. Supported: add, get, update, search, delete"
             )
     
     except HTTPException:

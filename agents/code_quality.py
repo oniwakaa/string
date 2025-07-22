@@ -38,7 +38,7 @@ class CodeQualityAgent(BaseAgent):
         super().__init__(
             name="Qwen3_CodeQualityAgent",
             role="code_quality_analyzer",
-            model_identifier="./models/qwen/qwen3-1.7b-q4_k_m.gguf"
+            model_name="Qwen3-1.7B-GGUF"  # Reference to YAML config
         )
         
         # Linter registry - maps language names to linter configurations
@@ -148,38 +148,7 @@ class CodeQualityAgent(BaseAgent):
             'stop': ["<|endoftext|>", "<|im_end|>", "```"],
         }
     
-    def lazy_load_model(self):
-        """
-        Load the Qwen3-1.7B GGUF model for qualitative analysis.
-        
-        This model is specifically optimized for code analysis tasks
-        and runs efficiently on MacBook Air M4.
-        """
-        if self.model is None:
-            try:
-                from llama_cpp import Llama
-                
-                self.status = 'loading_model'
-                print(f"🔄 Loading Qwen3-1.7B model for {self.name}...")
-                
-                # Verify model file exists
-                if not os.path.exists(self.model_identifier):
-                    raise FileNotFoundError(f"Model file not found: {self.model_identifier}")
-                
-                # Load model with optimizations
-                self.model = Llama(
-                    model_path=self.model_identifier,
-                    **self.qwen_config
-                )
-                
-                self.status = 'ready'
-                print(f"✅ Qwen3-1.7B model loaded successfully for {self.name}")
-                
-            except Exception as e:
-                self.status = 'error'
-                error_msg = f"❌ Failed to load Qwen3-1.7B model for {self.name}: {str(e)}"
-                print(error_msg)
-                raise RuntimeError(error_msg)
+    # lazy_load_model is now inherited from BaseAgent and handles ModelManager integration
     
     async def execute(self, task: Task) -> Result:
         """

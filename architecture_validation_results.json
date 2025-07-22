@@ -1,0 +1,195 @@
+{
+  "status": "passed",
+  "success_rate": 1.0,
+  "passed_tests": 3,
+  "total_tests": 3,
+  "results": {
+    "orchestration_test": {
+      "status": "passed",
+      "details": {
+        "http_status": 200,
+        "execution_time": 1.2597107887268066,
+        "response_status": "success",
+        "has_result": true,
+        "has_execution_plan": true,
+        "tasks_executed": 1,
+        "agent_status": {
+          "code_generator": "idle",
+          "code_quality_analyzer": "idle",
+          "code_editor": "idle",
+          "documentation": "idle",
+          "codebase_expert": "ready",
+          "web_researcher": "idle",
+          "tool_executor": "ready"
+        },
+        "success": true
+      }
+    },
+    "stress_test": {
+      "status": "passed",
+      "details": {
+        "total_requests": 20,
+        "successful_requests": 20,
+        "failed_requests": 0,
+        "success_rate": 1.0,
+        "execution_time": 36.00575375556946,
+        "total_files_loaded": 30,
+        "requests_per_second": 0.55546677722047,
+        "detailed_results": [
+          {
+            "request_id": 0,
+            "project_id": "stress_test_1",
+            "status_code": 200,
+            "success": true,
+            "files_loaded": 3
+          },
+          {
+            "request_id": 1,
+            "project_id": "stress_test_2",
+            "status_code": 200,
+            "success": true,
+            "files_loaded": 3
+          },
+          {
+            "request_id": 2,
+            "project_id": "stress_test_3",
+            "status_code": 200,
+            "success": true,
+            "files_loaded": 3
+          },
+          {
+            "request_id": 3,
+            "project_id": "stress_test_4",
+            "status_code": 200,
+            "success": true,
+            "files_loaded": 3
+          },
+          {
+            "request_id": 4,
+            "project_id": "stress_test_1",
+            "status_code": 200,
+            "success": true,
+            "files_loaded": 3
+          },
+          {
+            "request_id": 5,
+            "project_id": "stress_test_2",
+            "status_code": 200,
+            "success": true,
+            "files_loaded": 3
+          },
+          {
+            "request_id": 6,
+            "project_id": "stress_test_3",
+            "status_code": 200,
+            "success": true,
+            "files_loaded": 3
+          },
+          {
+            "request_id": 7,
+            "project_id": "stress_test_4",
+            "status_code": 200,
+            "success": true,
+            "files_loaded": 3
+          },
+          {
+            "request_id": 8,
+            "project_id": "stress_test_1",
+            "status_code": 200,
+            "success": true,
+            "files_loaded": 3
+          },
+          {
+            "request_id": 9,
+            "project_id": "stress_test_2",
+            "status_code": 200,
+            "success": true,
+            "files_loaded": 3
+          },
+          {
+            "request_id": 10,
+            "project_id": "stress_test_3",
+            "status_code": 200,
+            "success": "Test file 10 is a specific component or file within a larger system or application that serves a specific purpose. It can be a test case, a set of test conditions, a test scenario, or a set of test data. The purpose of test file 10 is to ensure that the system being tested meets the desired specifications, functions as intended, and is free from bugs or errors.",
+            "memory_enhanced": false
+          },
+          {
+            "request_id": 11,
+            "project_id": "stress_test_4",
+            "status_code": 200,
+            "success": "This test file 11 is a specific example of a test file used in various scenarios to test different functionalities or capabilities of a system or application. Test files are designed to mimic real-world data or inputs to evaluate the performance and accuracy of a system. In this case, test file 11 might be used to test a specific feature or behavior of a system. The purpose of test file 11 is to provide a controlled environment for testing and to help ensure that the system functions as intended. It is important to note that the details of test file 11 may vary depending on the specific requirements of the system being tested.",
+            "memory_enhanced": false
+          },
+          {
+            "request_id": 12,
+            "project_id": "stress_test_1",
+            "status_code": 200,
+            "success": "Test file 12 is a tool used to evaluate the performance and effectiveness of various systems and processes. It is typically created by developers and testers to assess the functionality and reliability of a system or application. Test file 12 can be used to identify and resolve any issues or bugs before the system is deployed in a live environment.\nThe specific content of test file 12 depends on the nature of the system being tested. It can include test cases, test data, and expected results. Test file 12 is designed to cover a wide range of scenarios and conditions, ensuring that the system can handle different types of inputs and situations.\nDuring the testing process, test file 12 is executed by a team of testers who follow a structured testing process to ensure that the system meets the required standards and expectations. This process involves the use of various testing techniques and methodologies to identify any weaknesses or areas for improvement.\nOverall, test file 12 is an important tool for ensuring the quality and reliability of systems. It helps identify any issues or bugs before the system is deployed, ensuring that it meets the required standards and expectations.",
+            "memory_enhanced": false
+          },
+          {
+            "request_id": 13,
+            "project_id": "stress_test_2",
+            "status_code": 200,
+            "success": "Test file 13 is a file containing test data for the test of the AI assistant. It contains a series of questions and answers to test the AI's ability to understand and respond to user inputs. The file is used to evaluate the AI's performance and identify any areas for improvement.",
+            "memory_enhanced": false
+          },
+          {
+            "request_id": 14,
+            "project_id": "stress_test_3",
+            "status_code": 200,
+            "success": "Test File 14 is a specific test file that is used to assess specific aspects of the AI system's capabilities and behavior. It is designed to provide a controlled environment for testing and analyzing various functionalities, features, or behaviors that the AI system may exhibit. Test File 14 may be used to evaluate the AI system's ability to handle complex scenarios, handle specific types of inputs or commands, or to assess its overall performance under certain conditions. It serves as a structured approach to systematically evaluate the AI system's capabilities and identify any areas that may require further refinement or improvement.",
+            "memory_enhanced": false
+          },
+          {
+            "request_id": 15,
+            "project_id": "stress_test_4",
+            "status_code": 200,
+            "success": "The test file 15 is a file that contains a set of predefined test cases to assess the performance and functionality of a system or application. It serves as a reference for developers, testers, and quality assurance professionals to evaluate the accuracy, responsiveness, and usability of the system under different scenarios. By providing a controlled environment for testing, the test file allows for systematic evaluation and identification of any issues or areas that require improvement.",
+            "memory_enhanced": false
+          },
+          {
+            "request_id": 16,
+            "project_id": "stress_test_1",
+            "status_code": 200,
+            "success": "The purpose of test file 16 is to provide a comprehensive test suite for the AI model. It includes a variety of positive and negative examples that cover a range of scenarios, questions, and responses. The test file is designed to validate the performance and accuracy of the AI model by providing a diverse set of inputs and expected outputs. By using test file 16, developers can ensure that the AI model is prepared to handle various types of input and provides accurate responses across different situations, helping to refine the model's overall effectiveness and reliability.",
+            "memory_enhanced": false
+          },
+          {
+            "request_id": 17,
+            "project_id": "stress_test_2",
+            "status_code": 200,
+            "success": "Test File 17 serves as a comprehensive guide for understanding the functionalities and capabilities of the AI assistant. This file is designed to provide a detailed overview of how the AI assistant operates, ensuring that users have a thorough understanding of its features and capabilities. By following Test File 17, users can gain valuable insights into the AI assistant's strengths and areas for improvement, enabling them to make informed decisions about its use.\nIn addition to providing a detailed overview of the AI assistant's capabilities, Test File 17 also serves as a practical demonstration of how the AI assistant can be effectively utilized in various scenarios. By following the steps outlined in this file, users can experience firsthand the benefits of using the AI assistant and understand how it can be integrated into their daily routines. This hands-on approach to learning helps to reinforce the user's understanding of the AI assistant's features and capabilities, ensuring that they can make the most of its potential.\nFurthermore, Test File 17 plays a crucial role in the development and refinement of the AI assistant, as it allows developers to identify areas where the AI assistant may be struggling and make necessary adjustments to improve its performance. By providing a detailed and comprehensive assessment of the AI assistant's capabilities, Test File 17 helps to drive continuous improvement and innovation in the development of the AI assistant, ensuring that it remains cutting-edge and responsive to user needs.\nOverall, Test File 17 is a valuable resource for both users and developers, providing a detailed understanding of the AI assistant's functionalities and capabilities. By following this file, users can gain a deeper appreciation for the AI assistant's potential and how it can be effectively utilized, while developers can use it to identify areas for improvement and drive continuous innovation in the development of the AI assistant.",
+            "memory_enhanced": false
+          },
+          {
+            "request_id": 18,
+            "project_id": "stress_test_3",
+            "status_code": 200,
+            "success": "The purpose of test file 18 is to evaluate the AI assistant's ability to engage in natural and helpful conversations. It includes prompts that require the assistant to provide information, perform tasks, and demonstrate its understanding of various topics. This file also assesses the assistant's ability to adapt and respond appropriately to different conversational styles and user input.",
+            "memory_enhanced": false
+          },
+          {
+            "request_id": 19,
+            "project_id": "stress_test_4",
+            "status_code": 200,
+            "success": "Test file 19 is a test file used to evaluate the performance of the AI assistant in understanding and responding to user queries. It contains a series of test cases designed to assess the AI's ability to answer questions, provide explanations, and handle various scenarios. The purpose of this test file is to ensure that the AI assistant can accurately and comprehensively respond to user queries, providing relevant and helpful information.",
+            "memory_enhanced": false
+          }
+        ],
+        "success": true
+      }
+    },
+    "eviction_test": {
+      "status": "passed",
+      "details": {
+        "model_a_loaded": "Sure! Here's a simple hello world function in Python:\ndef hello_world():\nprint(\"Hello, World!\")\nYou can call this function and print the result:\nhello_world()\nThis will output:\nHello, World!",
+        "model_b_loaded": true,
+        "wait_time_seconds": 10,
+        "model_b_load_time": 2.641272783279419,
+        "test_completion_time": 1753215887.9214752,
+        "success": true
+      }
+    }
+  }
+}

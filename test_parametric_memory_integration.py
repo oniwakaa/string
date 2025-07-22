@@ -82,7 +82,7 @@ async def test_parametric_memory_configuration():
         
         # Verify the configuration includes para_mem section
         expected_para_mem_components = [
-            "backend: persistent_storage",
+            "backend: uninitialized",
             "storage_type: json",
             "categories configuration",
             "coding_style category",
@@ -455,7 +455,7 @@ async def test_three_tier_integration():
             },
             "parametric_memory": {
                 "description": "Long-term project-specific guidelines and preferences",
-                "backend": "persistent_storage", 
+                "backend": "uninitialized", 
                 "components": ["preference_storage", "category_system", "search_functionality"],
                 "tested": True
             }

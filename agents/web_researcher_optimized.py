@@ -52,7 +52,7 @@ class PerformanceOptimizedWebResearcher(BaseAgent):
         super().__init__(
             name="HighPerf-WebResearcher", 
             role="web_researcher",
-            model_identifier=None
+            model_name=None
         )
         
         # Performance configuration

@@ -27,7 +27,7 @@ class WebResearcherAgent(BaseAgent):
         super().__init__(
             name="WebSailor-3B-Researcher", 
             role="web_researcher",
-            model_identifier=None  # Uses Ollama, not HuggingFace models
+            model_name=None  # Uses Ollama, not HuggingFace models
         )
         
         # Configure ScrapeGraphAI to use local Ollama models

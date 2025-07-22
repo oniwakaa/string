@@ -18,7 +18,17 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'MemOS', 'src'))
 
 from config_loader import ConfigLoader, load_config
 
-# Import llama-cpp-python for direct GGUF model loading
+# Import ModelManager for centralized model management
+try:
+    sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'src'))
+    from models.manager import ModelManager, model_manager
+    MODELMANAGER_AVAILABLE = True
+except ImportError as e:
+    print(f"❌ ModelManager not available: {e}")
+    print("💡 ModelManager is required for model management")
+    MODELMANAGER_AVAILABLE = False
+
+# Import llama-cpp-python for fallback compatibility
 try:
     from llama_cpp import Llama
     LLAMA_CPP_AVAILABLE = True
@@ -57,6 +67,14 @@ except ImportError as e:
     logger.warning(f"Project memory manager not available: {e}")
     PROJECT_MEMORY_AVAILABLE = False
 
+# Import ResourceManager for shared resource management
+try:
+    from src.core.resource_manager import get_resource_manager
+    RESOURCE_MANAGER_AVAILABLE = True
+except ImportError as e:
+    logger.warning(f"ResourceManager not available: {e}")
+    RESOURCE_MANAGER_AVAILABLE = False
+
 
 class GGUFMemoryService:
     """
@@ -85,9 +103,29 @@ class GGUFMemoryService:
         else:
             logger.warning("Project memory manager not available")
         
+        # Initialize ResourceManager for shared resource management
+        self.resource_manager = None
+        if RESOURCE_MANAGER_AVAILABLE:
+            self.resource_manager = get_resource_manager()
+            
+            # Pre-initialize Qdrant client to claim the storage path first
+            logger.info("🔧 Pre-initializing ResourceManager Qdrant client to prevent conflicts")
+            try:
+                self.resource_manager.get_qdrant_client()
+                logger.info("✅ ResourceManager Qdrant client pre-initialized successfully")
+            except Exception as e:
+                logger.error(f"❌ ResourceManager Qdrant pre-initialization failed: {e}")
+            
+            logger.info("✅ ResourceManager initialized for shared resource management")
+        else:
+            logger.warning("ResourceManager not available - MemOS will use internal factories")
+        
         # Check dependencies
+        if not MODELMANAGER_AVAILABLE:
+            raise RuntimeError("ModelManager is required but not available")
+        
         if not LLAMA_CPP_AVAILABLE:
-            raise RuntimeError("llama-cpp-python is required but not available")
+            logger.warning("llama-cpp-python not available - using ModelManager only")
         
         logger.info("GGUF Memory Service initialized")
     
@@ -122,57 +160,25 @@ class GGUFMemoryService:
     
     async def _initialize_gguf_model(self) -> bool:
         """
-        Initialize the GGUF model using llama-cpp-python directly.
+        Initialize the GGUF model using ModelManager for centralized model management.
         
         Returns:
             bool: True if initialization successful
         """
         try:
-            model_config = self.config.get('model', {})
+            # Use ModelManager to get the default model (SmolLM3-3B)
+            model_name = "SmolLM3-3B"  # Default model as configured in models.yaml
             
-            # Get model path - try multiple possible locations
-            configured_path = model_config.get('model_path', './smollm-quantized/smollm-q4_K_M.gguf')
+            logger.info(f"Loading GGUF model '{model_name}' via ModelManager")
             
-            possible_model_paths = [
-                './smollm-quantized/smollm-q4_K_M.gguf',
-                './smollm-quantized/ggml-model-f16.gguf',
-                './smollm/smollm-3b-instruct-q4_k_m.gguf',
-                configured_path  # Try configured path last
-            ]
+            # Get model from ModelManager - this handles all loading, caching, and memory management
+            self.llm = model_manager.get_model(model_name)
             
-            # Remove duplicates while preserving order
-            seen = set()
-            possible_model_paths = [x for x in possible_model_paths if not (x in seen or seen.add(x))]
-            
-            model_path = None
-            for path in possible_model_paths:
-                if os.path.exists(path):
-                    model_path = path
-                    break
-            
-            if not model_path:
-                logger.error(f"No GGUF model found. Searched paths: {possible_model_paths}")
+            if not self.llm:
+                logger.error(f"Failed to load model '{model_name}' via ModelManager")
                 return False
             
-            logger.info(f"Loading GGUF model from: {model_path}")
-            
-            # Get generation config
-            generation_config = model_config.get('generation', {})
-            
-            # Initialize Llama model with optimal settings for Apple Silicon
-            self.llm = Llama(
-                model_path=model_path,
-                n_gpu_layers=-1,  # Offload all layers to GPU (Metal on Apple Silicon)
-                n_ctx=generation_config.get('n_ctx', 16384),  # Increased from 4096 to better utilize model's training context
-                n_batch=generation_config.get('n_batch', 512),
-                verbose=False,
-                # Additional performance optimizations
-                use_mmap=True,
-                use_mlock=False,
-                n_threads=None,  # Auto-detect optimal thread count
-            )
-            
-            logger.info("✅ GGUF model loaded successfully with Metal acceleration")
+            logger.info(f"✅ GGUF model '{model_name}' loaded successfully via ModelManager with LRU eviction")
             
             # Test basic functionality
             test_response = self.llm(
@@ -190,7 +196,7 @@ class GGUFMemoryService:
                 return False
             
         except Exception as e:
-            logger.error(f"Failed to initialize GGUF model: {e}")
+            logger.error(f"Failed to initialize GGUF model via ModelManager: {e}")
             return False
     
     async def _initialize_memos(self) -> bool:
@@ -297,37 +303,45 @@ class GGUFMemoryService:
             
             logger.info("✅ MemOS initialized successfully with LlamaCpp wrapper")
             
-            # Register existing memory cubes if available
-            try:
-                import os
-                memory_cubes_dir = "./memory_cubes"
-                if os.path.exists(memory_cubes_dir):
-                    for user_dir in os.listdir(memory_cubes_dir):
-                        user_path = os.path.join(memory_cubes_dir, user_dir)
-                        if os.path.isdir(user_path):
-                            for cube_dir in os.listdir(user_path):
-                                cube_path = os.path.join(user_path, cube_dir)
-                                if os.path.isdir(cube_path) and os.path.exists(os.path.join(cube_path, "config.json")):
-                                    try:
-                                        self.mos_instance.register_mem_cube(
-                                            mem_cube_name_or_path=cube_path,
-                                            mem_cube_id=cube_dir,
-                                            user_id=user_dir
-                                        )
-                                        logger.info(f"✅ Registered memory cube: {cube_dir} for user {user_dir}")
-                                    except Exception as e:
-                                        logger.warning(f"⚠️ Failed to register cube {cube_dir}: {e}")
-            except Exception as e:
-                logger.warning(f"⚠️ Error registering memory cubes: {e}")
+            # Register existing memory cubes if available - SKIP when ResourceManager is active
+            if not self.resource_manager:
+                try:
+                    import os
+                    memory_cubes_dir = "./memory_cubes"
+                    logger.info("ResourceManager not available - registering legacy memory cubes")
+                    if os.path.exists(memory_cubes_dir):
+                        for user_dir in os.listdir(memory_cubes_dir):
+                            user_path = os.path.join(memory_cubes_dir, user_dir)
+                            if os.path.isdir(user_path):
+                                for cube_dir in os.listdir(user_path):
+                                    cube_path = os.path.join(user_path, cube_dir)
+                                    if os.path.isdir(cube_path) and os.path.exists(os.path.join(cube_path, "config.json")):
+                                        try:
+                                            self.mos_instance.register_mem_cube(
+                                                mem_cube_name_or_path=cube_path,
+                                                mem_cube_id=cube_dir,
+                                                user_id=user_dir
+                                            )
+                                            logger.info(f"✅ Registered memory cube: {cube_dir} for user {user_dir}")
+                                        except Exception as e:
+                                            logger.warning(f"⚠️ Failed to register cube {cube_dir}: {e}")
+                except Exception as e:
+                    logger.warning(f"⚠️ Error registering memory cubes: {e}")
+            else:
+                logger.info("✅ ResourceManager active - skipping legacy memory cube registration")
             
-            # Test basic functionality
-            try:
-                test_response = self.mos_instance.chat("Hello", user_id=user_id)
-                logger.info("✅ MemOS health check passed")
+            # Test basic functionality - SKIP when ResourceManager is active to prevent Qdrant conflicts
+            if not self.resource_manager:
+                try:
+                    test_response = self.mos_instance.chat("Hello", user_id=user_id)
+                    logger.info("✅ MemOS health check passed")
+                    return True
+                except Exception as e:
+                    logger.error(f"❌ MemOS health check failed: {e}")
+                    return False
+            else:
+                logger.info("✅ ResourceManager active - skipping MemOS health check to prevent Qdrant conflicts")
                 return True
-            except Exception as e:
-                logger.error(f"❌ MemOS health check failed: {e}")
-                return False
             
         except Exception as e:
             logger.error(f"Failed to initialize MemOS: {e}")
@@ -665,22 +679,28 @@ class GGUFMemoryService:
         effective_user_id = user_id or self.config.get('memos', {}).get('user_id', 'default_user')
         effective_project_id = project_id or "default"
         
-        # Use project memory manager for project-specific memory isolation
+        # Get project-specific MemCube via ResourceManager - THE CRITICAL FIX
+        project_mem_cube = None
+        cube_id = None
+        
         try:
-            # Create user if doesn't exist
-            if not self.mos_instance.user_manager.validate_user(effective_user_id):
-                self.mos_instance.create_user(user_id=effective_user_id)
-                logger.info(f"✅ Created user: {effective_user_id}")
-            
-            # Use project memory manager to get or create project-specific cube
-            if self.project_memory_manager:
+            if self.resource_manager and self.project_memory_manager:
                 cube_id = self.project_memory_manager.get_or_create_project_cube(
                     effective_user_id, effective_project_id
                 )
                 if not cube_id:
                     raise RuntimeError(f"Failed to create project cube for {effective_user_id}:{effective_project_id}")
                 
-                logger.info(f"✅ Using project cube: {cube_id}")
+                # Direct access to ResourceManager MemCube - bypasses cache lookup issues  
+                project_mem_cube = self.resource_manager.get_mem_cube(
+                    cube_id, 
+                    self.project_memory_manager._create_minimal_config(effective_user_id, effective_project_id)
+                )
+                
+                if not project_mem_cube:
+                    raise RuntimeError(f"ResourceManager failed to provide MemCube for {cube_id}")
+                    
+                logger.info(f"✅ Using ResourceManager project cube: {cube_id} (text_mem available: {project_mem_cube.text_mem is not None})")
             else:
                 # Fallback to old behavior if project memory manager not available
                 logger.warning("Project memory manager not available, using legacy cube creation")
@@ -730,9 +750,17 @@ class GGUFMemoryService:
                         }
                     )
                     
-                    mem_cube = GeneralMemCube(cube_config)
-                    cube_path = f"./memory_cubes/{effective_user_id}/{cube_id}"
-                    mem_cube.dump(cube_path)
+                    # Use ResourceManager to create MemCube with shared resources
+                    if self.resource_manager:
+                        mem_cube = self.resource_manager.get_mem_cube(cube_id, cube_config)
+                        cube_path = f"./memory_cubes/{effective_user_id}/{cube_id}"
+                        # ResourceManager handles internal resource sharing, no need to dump
+                        logger.info(f"✅ MemCube created via ResourceManager with shared resources")
+                    else:
+                        # Fallback to direct creation if ResourceManager unavailable
+                        mem_cube = GeneralMemCube(cube_config)  
+                        cube_path = f"./memory_cubes/{effective_user_id}/{cube_id}"
+                        mem_cube.dump(cube_path)
                     
                     self.mos_instance.register_mem_cube(
                         mem_cube_name_or_path=cube_path,
@@ -804,28 +832,51 @@ class GGUFMemoryService:
                         # Format content for memory storage
                         memory_content = f"File: {relative_path}\nPath: {file_path}\nExtension: {file_ext}\nContent:\n{content}"
                         
-                        # Create memory item
+                        # Create memory item with only valid TextualMemoryMetadata fields
                         memory_data = {
                             'memory': memory_content,
                             'metadata': {
-                                'type': 'codebase',
-                                'file_path': relative_path,
-                                'file_extension': file_ext,
-                                'file_size_bytes': file_size,
-                                'source': 'codebase_loader',
-                                'memory_time': datetime.now().isoformat(),
-                                'updated_at': datetime.now().isoformat(),
+                                'type': 'fact',  # Must be one of: procedure, fact, event, opinion, topic, reasoning
+                                'source': 'file',  # Must be one of: conversation, retrieved, web, file
+                                'memory_time': datetime.now().strftime('%Y-%m-%d'),  # Must be YYYY-MM-DD format
                                 'tags': ['code', 'file', file_ext.lstrip('.')],
                                 'entities': [os.path.basename(file_path)],
-                                'visibility': 'private'
+                                'status': 'activated'
                             }
                         }
                         
-                        # Add memory to MemOS (this will create a cube if needed)
-                        self.mos_instance.add(
-                            memory_content=memory_content,
-                            user_id=effective_user_id
-                        )
+                        # Add memory using ResourceManager's project-specific MemCube - THE CRITICAL FIX
+                        if project_mem_cube and project_mem_cube.text_mem:
+                            try:
+                                # Use ResourceManager's shared MemCube with proper document format
+                                from memos.memories.textual.item import TextualMemoryItem
+                                
+                                # Create metadata object first
+                                from memos.memories.textual.item import TextualMemoryMetadata
+                                
+                                metadata_obj = TextualMemoryMetadata(**memory_data['metadata'])
+                                
+                                memory_item = TextualMemoryItem(
+                                    memory=memory_content,
+                                    metadata=metadata_obj
+                                )
+                                
+                                # Add directly to the textual memory tier of ResourceManager's MemCube
+                                project_mem_cube.text_mem.add([memory_item])
+                                
+                                logger.debug(f"✅ [ResourceManager] Added to project MemCube: {relative_path}")
+                            except Exception as e:
+                                logger.warning(f"⚠️ [ResourceManager] Failed to add {relative_path}: {e}")
+                                # Continue processing other files
+                                continue
+                        else:
+                            # Fallback: Skip file if no proper MemCube available
+                            logger.warning(f"⚠️ [Skip] No ResourceManager MemCube available for {relative_path}")
+                            skipped_files.append({
+                                'path': relative_path,
+                                'reason': 'ResourceManager MemCube not available'
+                            })
+                            continue
                         
                         loaded_files.append({
                             'path': relative_path,
@@ -916,7 +967,12 @@ class GGUFMemoryService:
                 'config': {
                     'memory_retrieval_enabled': self.config.get('memory', {}).get('retrieval', {}).get('enabled', True),
                     'memory_top_k': self.config.get('memory', {}).get('retrieval', {}).get('top_k', 5),
-                    'model_path': self.config.get('model', {}).get('model_path'),
+                    'using_modelmanager': True,
+                },
+                'modelmanager': {
+                    'memory_stats': model_manager.get_memory_stats(),
+                    'available_models': model_manager.list_available_models(),
+                    'idle_timeout_seconds': model_manager.IDLE_TIMEOUT_SECONDS,
                 },
             }
             

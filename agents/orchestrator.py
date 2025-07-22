@@ -28,6 +28,12 @@ from .specialists import ToolExecutorAgent
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from project_memory_manager import ProjectMemoryManager, MEMOS_AVAILABLE
 
+# Add src to path for ModelManager import
+src_path = os.path.join(os.path.dirname(__file__), '..', 'src')
+if src_path not in sys.path:
+    sys.path.insert(0, src_path)
+from models.manager import model_manager
+
 
 class CodeGeneratorAgent(BaseAgent):
     """
@@ -41,7 +47,7 @@ class CodeGeneratorAgent(BaseAgent):
         super().__init__(
             name="Gemma3n_CodeGenerator",
             role="code_generator",
-            model_identifier="./models/gemma/google_gemma-3n-E4B-it-Q4_1.gguf"
+            model_name="gemma-3n-E4B-it"
         )
         
         # Gemma-specific configuration
@@ -82,15 +88,10 @@ class CodeGeneratorAgent(BaseAgent):
                 self.status = 'loading_model'
                 print(f"🔄 Loading Gemma-3n model for {self.name}...")
                 
-                # Verify model file exists
-                if not os.path.exists(self.model_identifier):
-                    raise FileNotFoundError(f"Model file not found: {self.model_identifier}")
-                
-                # Load model with M4 optimizations
-                self.model = Llama(
-                    model_path=self.model_identifier,
-                    **self.llama_config
-                )
+                # Use ModelManager to get shared model instance (no direct loading)
+                self.model = model_manager.get_model(self.model_name)
+                if not self.model:
+                    raise RuntimeError(f"ModelManager failed to load model: {self.model_name}")
                 
                 self.status = 'ready'
                 print(f"✅ Gemma-3n model loaded successfully for {self.name}")
@@ -425,7 +426,7 @@ class DocumentationAgent(BaseAgent):
         super().__init__(
             name="SmolLM_DocumentationAgent",
             role="documentation",
-            model_identifier="./smollm-quantized/"
+            model_name="SmolLM3-3B"
         )
     
     async def execute(self, task: Task) -> Result:
@@ -486,7 +487,7 @@ class CodebaseExpertAgent(BaseAgent):
         super().__init__(
             name="SmolLM_CodebaseExpert",
             role="codebase_expert",
-            model_identifier=None  # No local model loading required
+            model_name=None  # No local model loading required
         )
         
         # Service URL configuration
@@ -843,6 +844,24 @@ class ProjectManager:
             # Step 2: Create task graph with memory context
             tasks = self._create_task_graph(plan, user_prompt, user_id, project_id)
             
+            # Step 2.5: KVCache Extraction - Create stable context for caching
+            if mem_cube and hasattr(mem_cube, 'act_mem') and mem_cube.act_mem:
+                try:
+                    # Define stable system context for caching
+                    stable_context = f"""System Prompt: You are an expert software engineer working on project '{project_id}' for user '{user_id}'. 
+Always follow best practices, write clean and maintainable code, and provide detailed explanations.
+Current working context: {user_prompt[:200]}..."""
+                    
+                    # Extract and cache this stable context
+                    kv_item_to_cache = mem_cube.act_mem.extract(stable_context)
+                    if kv_item_to_cache:
+                        mem_cube.act_mem.add([kv_item_to_cache])
+                        print(f"🚀 KVCache: Extracted and cached stable context ({len(stable_context)} chars)")
+                    else:
+                        print("⚠️ KVCache: Failed to extract stable context")
+                except Exception as e:
+                    print(f"⚠️ KVCache extraction failed: {e}")
+            
             # Step 3: Execute tasks asynchronously
             results = await self._execute_task_graph(tasks)
             
@@ -1190,6 +1209,22 @@ class ProjectManager:
             # Only enrich context for agents that benefit from memory context
             if agent_role not in ['code_generator', 'code_editor', 'codebase_expert']:
                 return
+            
+            # Add KVCache injection for code generator tasks
+            if agent_role == 'code_generator':
+                mem_cube_key = f"{task.context.get('user_id', 'default_user')}_{task.context.get('project_id', 'default')}"
+                if mem_cube_key in self.active_mem_cubes:
+                    mem_cube = self.active_mem_cubes[mem_cube_key]
+                    if hasattr(mem_cube, 'act_mem') and mem_cube.act_mem:
+                        try:
+                            # Retrieve all cached KV items for injection
+                            cached_items = mem_cube.act_mem.get_all()
+                            if cached_items:
+                                # Attach MemCube to task for agent access
+                                task._mem_cube_instance = mem_cube
+                                print(f"🚀 KVCache: Injected {len(cached_items)} cached items for {agent_role}")
+                        except Exception as e:
+                            print(f"⚠️ KVCache injection failed: {e}")
             
             user_id = task.context.get('user_id', 'default_user')
             project_id = task.context.get('project_id', 'default')
