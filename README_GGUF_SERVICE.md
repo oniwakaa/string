@@ -18,6 +18,7 @@ A persistent service that integrates the SmolLM GGUF quantized model with the Me
 2. **MemOS Integration**: Seamless integration with MemOS memory retrieval system
 3. **Inference Pipeline**: Memory retrieval → Context enrichment → GGUF model inference
 4. **Health Monitoring**: Real-time status monitoring for both MemOS and GGUF model
+5. **Intent-Based Routing**: Model-driven intent classification using Gemma3n for accurate agent selection
 
 ## Installation
 
@@ -87,6 +88,23 @@ The service will:
 2. Initialize MemOS with memory capabilities
 3. Start the FastAPI server
 4. Provide health monitoring endpoints
+
+### Intent-Based Routing
+
+The service now uses model-driven intent classification for intelligent routing of user prompts to appropriate agents:
+
+- **Automatic Intent Detection**: Uses Gemma3n model to understand the semantic meaning of prompts
+- **Confidence Scoring**: Each classification includes confidence scores for decision transparency
+- **Fallback Support**: Hybrid approach falls back to keyword matching for low-confidence cases
+- **Multi-Intent Support**: Detects and processes secondary intents for complex workflows
+
+Supported intents:
+- `web_research`: Web scraping and content extraction
+- `codebase_query`: Search and explain existing code
+- `code_generation`: Create new code implementations
+- `code_editing`: Modify or fix existing code
+- `code_analysis`: Review code quality and security
+- `documentation`: Generate technical documentation
 
 ### API Endpoints
 

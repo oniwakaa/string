@@ -832,7 +832,7 @@ class ProjectManager:
                 print(f"✅ Memory environment ready for project: {user_id}_{project_id}")
             
             # Step 1: Decompose the prompt into a plan
-            plan = await self._decompose_prompt(user_prompt)
+            plan = await self._decompose_prompt(user_prompt, user_id)
             
             if not plan:
                 return {
@@ -884,215 +884,173 @@ Current working context: {user_prompt[:200]}..."""
                 "result": None
             }
     
-    async def _decompose_prompt(self, user_prompt: str) -> List[Dict[str, Any]]:
+    async def _decompose_prompt(self, user_prompt: str, user_id: str = "default_user") -> List[Dict[str, Any]]:
         """
-        Decompose user prompt into an executable plan.
+        Decompose user prompt into an executable plan using model-based intent classification.
         
-        Uses a rule-based approach initially, with the option to enhance
-        with LLM-based planning for more complex scenarios.
+        This method uses the GemmaIntentClassifier to understand the semantic meaning
+        of the prompt and route it to the appropriate agents with proper workflows.
+        
+        Args:
+            user_prompt: The user's input prompt
+            user_id: User identifier for context
+            
+        Returns:
+            List of plan steps with agent roles and dependencies
         """
-        plan = []
-        prompt_lower = user_prompt.lower()
-        
-        # Rule-based prompt analysis
-        
-        # Check for web research queries first
-        if any(keyword in prompt_lower for keyword in [
-            'scrape', 'web', 'website', 'url', 'fetch', 'extract from', 'get from', 'ricerca web',
-            'scraping', 'website content', 'page content', 'estrai da', 'ottieni da'
-        ]):
-            # Web research task
-            plan.append({
-                "step": 1,
-                "agent_role": "web_researcher",
-                "prompt": user_prompt,
-                "dependencies": []
-            })
+        try:
+            # Initialize the intent classifier
+            from src.inference import get_default_classifier
+            classifier = get_default_classifier()
             
-            # If user wants to process the scraped content further
-            if any(keyword in prompt_lower for keyword in [
-                'analizza', 'genera', 'crea', 'modifica', 'analyze', 'generate', 'create', 'modify'
-            ]):
-                plan.append({
-                    "step": 2,
-                    "agent_role": "code_generator",
-                    "prompt": f"Based on the web research results, {user_prompt}",
-                    "dependencies": [1]
-                })
-        
-        elif any(keyword in prompt_lower for keyword in [
-            'modifica', 'edit', 'cambia', 'change', 'fix', 'correggi', 'aggiorna', 'update', 
-            'refactor', 'rifattorizza', 'migliora', 'improve', 'applica', 'apply', 'bug'
-        ]):
-            # Code editing task - needs existing code and specific instructions
-            if any(keyword in prompt_lower for keyword in ['file', 'function', 'class', 'method', 'nel progetto', 'in the project', 'the ']):
-                # First get the code from codebase, then edit
-                plan.append({
-                    "step": 1,
-                    "agent_role": "codebase_expert",
-                    "prompt": f"Trova e recupera il codice da modificare per: {user_prompt}",
-                    "dependencies": []
-                })
-                plan.append({
-                    "step": 2,
-                    "agent_role": "code_editor",
-                    "prompt": user_prompt,
-                    "dependencies": [1]
-                })
-            else:
-                # Direct editing (code should be provided in context)
-                plan.append({
-                    "step": 1,
-                    "agent_role": "code_editor",
-                    "prompt": user_prompt,
-                    "dependencies": []
-                })
-        
-        # Check for codebase knowledge queries
-        elif any(keyword in prompt_lower for keyword in [
-            'trova', 'cerca', 'dove', 'come funziona', 'che cosa fa', 'explain', 'find', 'search', 
-            'where', 'how does', 'what does', 'show me', 'mostrami', 'function', 'funzione',
-            'class', 'classe', 'method', 'metodo', 'file', 'directory', 'cartella'
-        ]):
-            # Codebase expert task - query existing knowledge
-            plan.append({
-                "step": 1,
-                "agent_role": "codebase_expert",
-                "prompt": user_prompt,
-                "dependencies": []
-            })
+            # Classify the user's intent
+            context = {"user_id": user_id}
+            classification = classifier.classify(user_prompt, context)
             
-            # If user wants to modify based on findings
-            if any(keyword in prompt_lower for keyword in ['modifica', 'cambia', 'aggiorna', 'migliora', 'modify', 'change', 'improve']):
-                plan.append({
-                    "step": 2,
-                    "agent_role": "code_generator",
-                    "prompt": f"Basandoti sulle informazioni del codebase, {user_prompt}",
-                    "dependencies": [1]
-                })
-        
-        elif any(keyword in prompt_lower for keyword in ['genera', 'crea', 'scrivi', 'implementa', 'develop', 'build', 'create']):
-            # Check if this requires codebase knowledge first
-            if any(keyword in prompt_lower for keyword in [
-                'basandoti', 'usando', 'integra', 'estendi', 'based on', 'using', 'integrate', 'extend',
-                'similar to', 'simile a', 'like', 'come'
-            ]):
-                # First get codebase context, then generate
-                plan.append({
-                    "step": 1,
-                    "agent_role": "codebase_expert",
-                    "prompt": f"Cerca nel codebase informazioni rilevanti per: {user_prompt}",
-                    "dependencies": []
-                })
-                plan.append({
-                    "step": 2,
-                    "agent_role": "code_generator",
-                    "prompt": user_prompt,
-                    "dependencies": [1]
-                })
-            else:
-                # Direct code generation task
-                plan.append({
-                    "step": 1,
-                    "agent_role": "code_generator",
-                    "prompt": user_prompt,
-                    "dependencies": []
-                })
+            print(f"🎯 Intent Classification: {classification.primary_intent} (confidence: {classification.confidence:.2f})")
+            if classification.secondary_intents:
+                secondary_str = ", ".join([f"{intent}({score:.2f})" for intent, score in classification.secondary_intents])
+                print(f"   Secondary intents: {secondary_str}")
             
-            # If user also wants analysis or documentation
-            if any(keyword in prompt_lower for keyword in ['analizza', 'verifica', 'controlla', 'review']):
-                plan.append({
-                    "step": len(plan) + 1,
-                    "agent_role": "code_quality_analyzer",
-                    "prompt": f"Analizza il codice generato e fornisci feedback su qualità, best practices e potenziali miglioramenti.",
-                    "dependencies": [len(plan)]
-                })
+            # If confidence is too low, use fallback intent
+            if not classification.meets_threshold(0.5):
+                print("⚠️ Low confidence classification, using general fallback")
+                classification.primary_intent = 'general_query'
+                classification.confidence = 0.3
             
-            if any(keyword in prompt_lower for keyword in ['documenta', 'documentation', 'spiega', 'descrivi']):
-                plan.append({
-                    "step": len(plan) + 1,
-                    "agent_role": "documentation",
-                    "prompt": f"Crea documentazione completa per il codice generato, includendo esempi d'uso e spiegazioni.",
-                    "dependencies": [len(plan)]
-                })
-        
-        elif any(keyword in prompt_lower for keyword in ['analizza', 'verifica', 'controlla', 'review', 'audit']):
-            # Code analysis task - might need codebase context
-            if any(keyword in prompt_lower for keyword in ['file', 'function', 'class', 'method', 'nel progetto', 'in the project']):
-                # First get the code from codebase, then analyze
-                plan.append({
-                    "step": 1,
-                    "agent_role": "codebase_expert",
-                    "prompt": f"Trova e recupera il codice rilevante per: {user_prompt}",
-                    "dependencies": []
-                })
-                plan.append({
-                    "step": 2,
-                    "agent_role": "code_quality_analyzer",
-                    "prompt": user_prompt,
-                    "dependencies": [1]
-                })
-                
-                # Check if user wants to apply the fixes
-                if any(keyword in prompt_lower for keyword in [
-                    'fix', 'correggi', 'applica', 'apply', 'resolve', 'risolvi', 'migliora', 'improve'
-                ]):
+            # Build plan based on classification
+            plan = []
+            
+            # Get the primary agent for the intent
+            primary_agent = classifier.get_agent_for_intent(classification.primary_intent)
+            if not primary_agent:
+                print(f"⚠️ No agent found for intent '{classification.primary_intent}', using fallback")
+                primary_agent = "codebase_expert"
+            
+            # Check if we have a workflow to follow
+            if classification.workflow:
+                # Use the predefined workflow
+                workflow_steps = classification.workflow.get('workflow', [])
+                for step_config in workflow_steps:
                     plan.append({
-                        "step": 3,
-                        "agent_role": "code_editor",
-                        "prompt": "Apply the recommended fixes and improvements identified in the analysis",
-                        "dependencies": [1, 2]  # Needs both the code and the analysis
+                        "step": step_config['step'],
+                        "agent_role": step_config['agent'],
+                        "prompt": user_prompt if step_config['step'] == 1 else f"Based on previous results, {user_prompt}",
+                        "dependencies": step_config.get('dependencies', [])
                     })
             else:
-                # Direct analysis
-                plan.append({
-                    "step": 1,
-                    "agent_role": "code_quality_analyzer",
-                    "prompt": user_prompt,
-                    "dependencies": []
-                })
-        
-        elif any(keyword in prompt_lower for keyword in ['documenta', 'documentation', 'spiega', 'descrivi']):
-            # Documentation task - might need codebase context
-            if any(keyword in prompt_lower for keyword in ['function', 'class', 'method', 'api', 'nel progetto', 'in the project']):
-                # First get the code from codebase, then document
-                plan.append({
-                    "step": 1,
-                    "agent_role": "codebase_expert",
-                    "prompt": f"Trova e recupera il codice da documentare per: {user_prompt}",
-                    "dependencies": []
-                })
-                plan.append({
-                    "step": 2,
-                    "agent_role": "documentation",
-                    "prompt": user_prompt,
-                    "dependencies": [1]
-                })
-            else:
-                # Direct documentation
-                plan.append({
-                    "step": 1,
-                    "agent_role": "documentation",
-                    "prompt": user_prompt,
-                    "dependencies": []
-                })
-        
-        else:
-            # Default: try codebase expert first for context, then code generation
-            plan.append({
+                # Build plan based on intent and context modifiers
+                step_counter = 1
+                
+                # Check if we need to add context retrieval first
+                needs_context = any(mod in ['prepend_codebase_query', 'add_context_retrieval'] 
+                                  for mod in classification.context_modifiers)
+                
+                # Special handling for code_editing intent
+                if classification.primary_intent == "code_editing":
+                    # Code editing always needs context unless code is provided
+                    if needs_context or "file" in user_prompt.lower() or "function" in user_prompt.lower():
+                        plan.append({
+                            "step": step_counter,
+                            "agent_role": "codebase_expert",
+                            "prompt": f"Find and retrieve the code to be modified for: {user_prompt}",
+                            "dependencies": []
+                        })
+                        step_counter += 1
+                        
+                        plan.append({
+                            "step": step_counter,
+                            "agent_role": primary_agent,
+                            "prompt": user_prompt,
+                            "dependencies": [step_counter - 1]
+                        })
+                        step_counter += 1
+                    else:
+                        # Direct editing
+                        plan.append({
+                            "step": step_counter,
+                            "agent_role": primary_agent,
+                            "prompt": user_prompt,
+                            "dependencies": []
+                        })
+                        step_counter += 1
+                
+                # Handle other intents with context requirements
+                elif needs_context and classification.primary_intent in ["code_generation", "code_analysis", "documentation"]:
+                    # Add context retrieval step
+                    plan.append({
+                        "step": step_counter,
+                        "agent_role": "codebase_expert",
+                        "prompt": f"Search codebase for relevant information: {user_prompt}",
+                        "dependencies": []
+                    })
+                    step_counter += 1
+                    
+                    # Add primary task with dependency
+                    plan.append({
+                        "step": step_counter,
+                        "agent_role": primary_agent,
+                        "prompt": user_prompt,
+                        "dependencies": [step_counter - 1]
+                    })
+                    step_counter += 1
+                else:
+                    # Direct execution of primary intent
+                    plan.append({
+                        "step": step_counter,
+                        "agent_role": primary_agent,
+                        "prompt": user_prompt,
+                        "dependencies": []
+                    })
+                    step_counter += 1
+                
+                # Process secondary intents
+                for secondary_intent, confidence in classification.secondary_intents:
+                    if confidence > 0.5:  # Only process high-confidence secondary intents
+                        secondary_agent = classifier.get_agent_for_intent(secondary_intent)
+                        if secondary_agent and secondary_agent != primary_agent:
+                            # Determine appropriate prompt for secondary task
+                            if secondary_intent == "code_analysis":
+                                secondary_prompt = "Analyze the generated code for quality, best practices, and potential improvements"
+                            elif secondary_intent == "documentation":
+                                secondary_prompt = "Create comprehensive documentation for the code, including usage examples"
+                            elif secondary_intent == "apply_fixes":
+                                secondary_prompt = "Apply the recommended fixes and improvements from the analysis"
+                            else:
+                                secondary_prompt = f"Process the results for: {user_prompt}"
+                            
+                            plan.append({
+                                "step": step_counter,
+                                "agent_role": secondary_agent,
+                                "prompt": secondary_prompt,
+                                "dependencies": [step_counter - 1]
+                            })
+                            step_counter += 1
+            
+            # Log the execution plan
+            print(f"📋 Execution plan created with {len(plan)} steps:")
+            for step in plan:
+                deps = f" (depends on: {step['dependencies']})" if step['dependencies'] else ""
+                print(f"   Step {step['step']}: {step['agent_role']}{deps}")
+            
+            return plan
+            
+        except Exception as e:
+            print(f"❌ Model-based routing failed: {e}")
+            print("⚠️ Using general fallback routing")
+            # Fall back to general routing
+            return [{
                 "step": 1,
                 "agent_role": "codebase_expert",
-                "prompt": f"Cerca nel codebase informazioni rilevanti per questa richiesta: {user_prompt}",
+                "prompt": f"Search codebase for relevant information: {user_prompt}",
                 "dependencies": []
-            })
-            plan.append({
+            }, {
                 "step": 2,
                 "agent_role": "code_generator",
                 "prompt": user_prompt,
                 "dependencies": [1]
-            })
-        
-        return plan
+            }]
+    
     
     def _create_task_graph(self, plan: List[Dict[str, Any]], original_prompt: str, user_id: str = "default_user", project_id: str = "default") -> List[Task]:
         """

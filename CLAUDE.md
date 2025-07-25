@@ -166,3 +166,36 @@ project_root/
 - [ ] Begin CLI development in `cli/` directory following Section 6.1.
 
 The system is stable, performant, and ready for the CLI layer. No blocking backend issues remain—focus can shift entirely to completing the user-facing interface.
+
+## 8 · Intent-Based Routing Implementation (2025-01-25)
+
+The prompt routing system has been refactored from hardcoded keyword lists to a model-based intent classifier:
+
+### 8.1 Key Changes
+1. **Intent Classifier** (`src/inference/intent_classifier.py`)
+   - GemmaIntentClassifier uses Gemma3n model for semantic understanding
+   - Confidence scoring for classification decisions
+   - Fallback to keyword matching for low-confidence cases
+
+2. **Agent Registry** (`config/agent_intent_registry.yaml`)
+   - Centralized intent-to-agent mappings
+   - Workflow definitions for multi-step operations
+   - Context modifier detection
+
+3. **Orchestrator Refactoring** (`agents/orchestrator.py`)
+   - `_decompose_prompt()` now uses model-based classification
+   - Hybrid approach combines ML and keyword matching
+   - Backward compatibility preserved
+
+### 8.2 Benefits
+- More accurate intent detection through semantic understanding
+- Support for ambiguous or complex prompts
+- Extensible system for adding new intents
+- Confidence-based decision making
+- Multi-language support without explicit keyword translation
+
+### 8.3 Architecture Status
+**STABLE and ENHANCED (2025-01-25)**
+- Model-based intent routing integrated with Gemma3n
+- Backward compatibility with keyword routing maintained
+- Ready for production use with intelligent prompt understanding

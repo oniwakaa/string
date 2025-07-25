@@ -1,0 +1,230 @@
+# Agent-Intent Registry
+# This file maps user intents to their corresponding agents and handlers
+
+version: "1.0"
+registry_type: "intent_to_agent_mapping"
+
+# Supported intents with their agent mappings
+intents:
+  # Web scraping and research intent
+  web_research:
+    description: "Extract, scrape, or fetch content from web pages and URLs"
+    primary_agent: "web_researcher"
+    handler_module: "agents.web_researcher_optimized"
+    handler_class: "PerformanceOptimizedWebResearcher"
+    confidence_threshold: 0.7
+    examples:
+      - "scrape data from https://example.com"
+      - "fetch the content of this website"
+      - "extract information from the webpage"
+      - "ricerca web per documentazione Python"
+    secondary_intents:
+      - "analyze_web_content"
+      - "generate_from_web"
+
+  # Codebase knowledge and search intent
+  codebase_query:
+    description: "Search, find, or explain code elements in the existing codebase"
+    primary_agent: "codebase_expert"
+    handler_module: "agents.orchestrator"
+    handler_class: "CodebaseExpertAgent"
+    confidence_threshold: 0.75
+    examples:
+      - "find the implementation of the login function"
+      - "where is the database connection class?"
+      - "explain how the authentication works"
+      - "mostrami la funzione di validazione"
+    secondary_intents:
+      - "code_modification"
+      - "code_documentation"
+
+  # Code generation intent
+  code_generation:
+    description: "Create, generate, or implement new code from specifications"
+    primary_agent: "code_generator"
+    handler_module: "agents.orchestrator"
+    handler_class: "CodeGeneratorAgent"
+    confidence_threshold: 0.8
+    examples:
+      - "create a REST API endpoint for user management"
+      - "generate a Python function to validate emails"
+      - "implementa una classe per gestire i file"
+      - "build a React component for data visualization"
+    requires_context_check: true
+    context_intents:
+      - "codebase_integration"
+
+  # Code editing and modification intent
+  code_editing:
+    description: "Edit, modify, fix, or refactor existing code"
+    primary_agent: "code_editor"
+    handler_module: "agents.code_editor"
+    handler_class: "CodeEditorAgent"
+    confidence_threshold: 0.75
+    examples:
+      - "fix the bug in the authentication function"
+      - "refactor this method to improve performance"
+      - "modifica la funzione per aggiungere validazione"
+      - "update the error handling in this code"
+    requires_context: true
+    prerequisite_intent: "codebase_query"
+
+  # Code quality analysis intent
+  code_analysis:
+    description: "Analyze, review, audit code for quality, bugs, or improvements"
+    primary_agent: "code_quality_analyzer"
+    handler_module: "agents.code_quality"
+    handler_class: "CodeQualityAgent"
+    confidence_threshold: 0.7
+    examples:
+      - "analyze this code for potential issues"
+      - "review the security of this implementation"
+      - "controlla la qualità del codice"
+      - "audit the performance bottlenecks"
+    post_analysis_intents:
+      - "apply_fixes"
+
+  # Documentation generation intent
+  documentation:
+    description: "Create or generate documentation for code, APIs, or features"
+    primary_agent: "documentation"
+    handler_module: "agents.orchestrator"
+    handler_class: "DocumentationAgent"
+    confidence_threshold: 0.8
+    examples:
+      - "document this API endpoint"
+      - "create usage examples for this class"
+      - "genera la documentazione per questa funzione"
+      - "explain how to use this module"
+    context_aware: true
+
+  # Tool execution intent (indirect)
+  tool_execution:
+    description: "Execute file operations, terminal commands, or system actions"
+    primary_agent: "tool_executor"
+    handler_module: "agents.specialists"
+    handler_class: "ToolExecutorAgent"
+    confidence_threshold: 0.9
+    triggered_by: "next_action_metadata"
+    examples:
+      - '{"tool": "create_file", "args": {"file_path": "example.py", "content": "..."}}'
+      - '{"tool": "run_terminal_command", "args": {"command": ["python", "test.py"]}}'
+    indirect_intent: true
+
+  # General chat or unclear intent
+  general_query:
+    description: "General questions or unclear requests that need context"
+    primary_agent: "codebase_expert"
+    fallback_agent: "code_generator"
+    confidence_threshold: 0.3
+    is_fallback: true
+
+# Intent combinations and workflows
+workflows:
+  # Web research followed by code generation
+  web_to_code:
+    trigger_intents: ["web_research"]
+    secondary_keywords: ["analyze", "generate", "create", "analizza", "genera", "crea"]
+    workflow:
+      - agent: "web_researcher"
+        step: 1
+      - agent: "code_generator"
+        step: 2
+        dependencies: [1]
+
+  # Codebase search followed by editing
+  search_and_edit:
+    trigger_intents: ["codebase_query"]
+    secondary_keywords: ["modify", "change", "update", "modifica", "cambia", "aggiorna"]
+    workflow:
+      - agent: "codebase_expert"
+        step: 1
+      - agent: "code_editor"
+        step: 2
+        dependencies: [1]
+
+  # Code generation with analysis
+  generate_and_analyze:
+    trigger_intents: ["code_generation"]
+    secondary_keywords: ["analyze", "review", "check", "analizza", "verifica", "controlla"]
+    workflow:
+      - agent: "code_generator"
+        step: 1
+      - agent: "code_quality_analyzer"
+        step: 2
+        dependencies: [1]
+
+  # Analysis followed by fixes
+  analyze_and_fix:
+    trigger_intents: ["code_analysis"]
+    secondary_keywords: ["fix", "apply", "resolve", "correggi", "applica", "risolvi"]
+    workflow:
+      - agent: "code_quality_analyzer"
+        step: 1
+      - agent: "code_editor"
+        step: 2
+        dependencies: [1]
+
+# Context modifiers that affect intent routing
+context_modifiers:
+  requires_codebase_context:
+    keywords: ["based on", "using", "integrate", "extend", "similar to", "basandoti", "usando", "integra", "estendi", "simile a"]
+    action: "prepend_codebase_query"
+  
+  file_or_class_context:
+    keywords: ["file", "function", "class", "method", "in the project", "nel progetto"]
+    action: "add_context_retrieval"
+
+# Confidence score adjustments
+confidence_adjustments:
+  # Boost confidence if multiple keywords from same intent
+  keyword_clustering: 0.1
+  
+  # Reduce confidence for mixed intent signals
+  mixed_intent_penalty: -0.15
+  
+  # Boost for exact phrase matches
+  exact_phrase_bonus: 0.2
+  
+  # Language consistency bonus
+  consistent_language: 0.05
+
+# Agent metadata for routing decisions
+agents:
+  web_researcher:
+    capabilities: ["web_scraping", "content_extraction", "url_fetching"]
+    resource_intensive: true
+    supports_streaming: true
+    
+  codebase_expert:
+    capabilities: ["rag_search", "code_retrieval", "pattern_matching"]
+    resource_intensive: false
+    supports_streaming: false
+    
+  code_generator:
+    capabilities: ["code_synthesis", "implementation", "boilerplate_generation"]
+    resource_intensive: true
+    supports_streaming: true
+    model: "gemma-3n-E4B-it"
+    
+  code_editor:
+    capabilities: ["precise_edits", "refactoring", "bug_fixes"]
+    resource_intensive: false
+    supports_streaming: false
+    
+  code_quality_analyzer:
+    capabilities: ["static_analysis", "linting", "security_checks", "llm_review"]
+    resource_intensive: true
+    supports_streaming: true
+    model: "qwen3-1.7B"
+    
+  documentation:
+    capabilities: ["tech_writing", "api_docs", "usage_examples"]
+    resource_intensive: false
+    supports_streaming: true
+    
+  tool_executor:
+    capabilities: ["file_operations", "terminal_commands", "system_actions"]
+    resource_intensive: false
+    supports_streaming: false
+    requires_confirmation: true

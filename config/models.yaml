@@ -7,7 +7,7 @@ models:
       n_gpu_layers: -1
 
   gemma-3n-E4B-it:
-    path: "models/gemma/google_gemma-3n-E4B-it-Q4_1.gguf"
+    path: "models/gemma/gemma-3n-e4b-it_q4_k_m.gguf"
     loader: "llama-cpp"
     params:
       n_ctx: 8192
