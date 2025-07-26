@@ -1,0 +1,346 @@
+# Action Permission Configuration
+# Defines security classes and confirmation requirements for ToolExecutorAgent
+
+version: "1.0"
+security_model: "graduated_permissions"
+
+# Action classifications with security levels
+action_classes:
+  
+  # AUTO-ALLOWED: Execute immediately without confirmation
+  auto_allowed:
+    
+    read_search_operations:
+      description: "Read-only operations for searching, inspecting, and querying"
+      risk_level: "minimal"
+      requires_confirmation: false
+      examples:
+        - "search for TODOs in the codebase"
+        - "find Python files in src directory"
+        - "grep for import statements"
+        - "show git status"
+        - "list directory contents"
+      allowed_commands:
+        - "grep"
+        - "find" 
+        - "cat"
+        - "head"
+        - "tail"
+        - "ls"
+        - "pwd"
+        - "wc"
+        - "sort"
+        - "uniq"
+        - "cut"
+        - "awk"
+        - "sed" # read-only sed operations only
+      command_patterns:
+        - "^grep\\s+.*"
+        - "^find\\s+.*"
+        - "^cat\\s+.*"
+        - "^ls\\s+.*"
+        - "^head\\s+.*"
+        - "^tail\\s+.*"
+    
+    server_operations:
+      description: "Start development servers and run applications"  
+      risk_level: "low"
+      requires_confirmation: false
+      examples:
+        - "start the development server"
+        - "run the Flask app"
+        - "serve the React application"
+        - "launch the API server"
+      allowed_commands:
+        - "npm start"
+        - "npm run dev"
+        - "npm run serve"
+        - "yarn start"
+        - "yarn dev"
+        - "python -m flask run"
+        - "python manage.py runserver"
+        - "cargo run"
+        - "go run"
+        - "java -jar"
+      command_patterns:
+        - "^(npm|yarn)\\s+(start|run\\s+(dev|serve|build)).*"
+        - "^python\\s+(-m\\s+)?(flask\\s+run|manage\\.py\\s+runserver).*"
+        - "^(cargo|go)\\s+run.*"
+    
+    build_compile_operations:
+      description: "Compile, build, and test code"
+      risk_level: "low" 
+      requires_confirmation: false
+      examples:
+        - "build the project"
+        - "compile TypeScript files"
+        - "run unit tests"
+        - "install dependencies"
+      allowed_commands:
+        - "npm run build"
+        - "npm run test"
+        - "npm install"
+        - "yarn build"
+        - "yarn test"
+        - "yarn install"
+        - "cargo build"
+        - "cargo test"
+        - "tsc"
+        - "python -m pytest"
+        - "python -m pip install"
+        - "mvn compile"
+        - "gradle build"
+      command_patterns:
+        - "^(npm|yarn)\\s+(run\\s+)?(build|test|install).*"
+        - "^cargo\\s+(build|test).*"
+        - "^(tsc|javac)\\s+.*"
+        - "^python\\s+-m\\s+(pytest|pip\\s+install).*"
+    
+    git_inspect_operations:
+      description: "Git operations for inspection and status checking"
+      risk_level: "minimal"
+      requires_confirmation: false
+      examples:
+        - "check git status"  
+        - "show recent commits"
+        - "view file differences"
+        - "list branches"
+      allowed_commands:
+        - "git status"
+        - "git log"
+        - "git diff"
+        - "git branch"
+        - "git show" 
+        - "git blame"
+        - "git ls-files"
+      command_patterns:
+        - "^git\\s+(status|log|diff|branch|show|blame|ls-files).*"
+
+  # RESTRICTED: Require explicit user confirmation  
+  restricted:
+    
+    file_modification_operations:
+      description: "Operations that modify or remove files"
+      risk_level: "high"
+      requires_confirmation: true
+      confirmation_template: "⚠️  This will {action} {target}. Continue? [y/N]"
+      examples:
+        - "remove unused files"
+        - "delete temporary directories"
+        - "clean build artifacts"
+        - "move files to different location"
+      allowed_commands:
+        - "rm"
+        - "rmdir"
+        - "mv"
+        - "git clean"
+        - "git rm"
+      command_patterns:
+        - "^rm\\s+.*"
+        - "^rmdir\\s+.*" 
+        - "^mv\\s+.*"
+        - "^git\\s+(clean|rm).*"
+      safety_checks:
+        - "confirm_target_paths"
+        - "check_backup_availability"
+        - "validate_not_system_files"
+    
+    server_shutdown_operations:
+      description: "Stop running processes and services"
+      risk_level: "medium"
+      requires_confirmation: true
+      confirmation_template: "🛑 This will stop {service}. Continue? [y/N]"
+      examples:
+        - "stop the development server"
+        - "kill running processes"
+        - "shutdown database service"
+      allowed_commands:
+        - "pkill"
+        - "killall"
+        - "docker stop"
+        - "docker-compose down"
+      command_patterns:
+        - "^(pkill|killall)\\s+.*"
+        - "^docker(-compose)?\\s+(stop|down).*"
+      safety_checks:
+        - "confirm_process_identification"
+        - "check_graceful_shutdown_option"
+    
+    git_modification_operations:
+      description: "Git operations that modify repository state"
+      risk_level: "medium"
+      requires_confirmation: true
+      confirmation_template: "🔄 This will modify git history/state: {command}. Continue? [y/N]"
+      examples:
+        - "commit changes"
+        - "push to remote"
+        - "reset to previous commit"
+        - "rebase branches"
+      allowed_commands:
+        - "git add"
+        - "git commit" 
+        - "git push"
+        - "git pull"
+        - "git reset"
+        - "git rebase"
+        - "git merge"
+        - "git stash"
+      command_patterns:
+        - "^git\\s+(add|commit|push|pull|reset|rebase|merge|stash).*"
+      safety_checks:
+        - "check_uncommitted_changes"
+        - "validate_remote_permissions"
+
+  # ADMIN: Require elevated confirmation with additional warnings
+  admin_restricted:
+    
+    system_configuration:
+      description: "System-level configuration changes"
+      risk_level: "maximum"
+      requires_confirmation: true
+      requires_elevated_confirmation: true
+      confirmation_template: "🚨 ADMIN ACTION: {command} affects system configuration. Type 'CONFIRM' to proceed:"
+      examples:
+        - "change file permissions"
+        - "modify system services"
+        - "install system packages"
+      allowed_commands:
+        - "chmod"
+        - "chown"
+        - "sudo"
+        - "systemctl"
+        - "service"
+      command_patterns:
+        - "^(chmod|chown)\\s+.*"
+        - "^sudo\\s+.*"
+        - "^(systemctl|service)\\s+.*"
+      safety_checks:
+        - "validate_admin_privileges"
+        - "confirm_system_impact"
+        - "check_rollback_capability"
+
+# Security validation rules
+security_validation:
+  
+  # Input sanitization patterns
+  sanitization:
+    blocked_patterns:
+      - "\\|\\|"        # Command chaining
+      - "&&"           # Command chaining  
+      - ";"            # Command separation
+      - "`.*`"         # Command substitution
+      - "\\$\\(.*\\)"  # Command substitution
+      - "\\.\\./\\.\\./" # Path traversal
+      - "~/\\.\\./"    # Path traversal
+    
+    required_escaping:
+      - "'"            # Single quotes
+      - "\""           # Double quotes
+      - "\\"           # Backslashes
+  
+  # Path validation rules
+  path_security:
+    allowed_directories:
+      - "."            # Current directory
+      - "./src"        # Source directory
+      - "./tests"      # Test directory
+      - "./docs"       # Documentation
+      - "./config"     # Configuration
+      - "./scripts"    # Scripts directory
+    
+    blocked_directories:
+      - "/etc"         # System configuration
+      - "/usr"         # System binaries
+      - "/bin"         # System binaries
+      - "/sbin"        # System binaries
+      - "/var"         # System variables
+      - "/root"        # Root home directory
+      - "/home"        # User home directories (except current user)
+    
+    file_extension_limits:
+      allowed:
+        - ".py"
+        - ".js"
+        - ".ts"
+        - ".tsx"
+        - ".jsx"
+        - ".html"
+        - ".css"
+        - ".scss"
+        - ".json"
+        - ".yaml"
+        - ".yml"
+        - ".md"
+        - ".txt"
+        - ".csv"
+        - ".xml"
+        - ".sql"
+        - ".sh"
+        - ".env"
+        - ".gitignore"
+      blocked:
+        - ".exe"
+        - ".bin"
+        - ".dll"
+        - ".so"
+
+# Confirmation system configuration
+confirmation_system:
+  
+  # Timeout settings
+  timeouts:
+    default_timeout: 30          # seconds
+    admin_timeout: 60           # seconds for admin actions
+    auto_deny_on_timeout: true
+  
+  # Confirmation templates
+  templates:
+    default: "⚠️  Execute: {command}? [y/N]"
+    file_operation: "📁 {operation} {files}? [y/N]"
+    server_operation: "🔧 {operation} {service}? [y/N]"
+    admin_operation: "🚨 ADMIN: {operation}. Type 'CONFIRM':"
+  
+  # Auto-confirmation for specific patterns (testing/CI)
+  auto_confirm:
+    enabled: false
+    patterns: []
+  
+  # Logging configuration  
+  audit_logging:
+    log_all_confirmations: true
+    log_denied_actions: true
+    log_timeout_actions: true
+    include_user_context: true
+
+# Integration settings
+integration:
+  
+  # CLI interaction
+  cli_integration:
+    confirmation_prompt_format: "interactive"
+    use_colors: true
+    show_command_preview: true
+    show_risk_level: true
+  
+  # Model integration for command generation
+  model_integration:
+    primary_model: "SmolLM3-3B"
+    fallback_model: "gemma-3n-E4B-it" 
+    command_generation_prompt: |
+      Convert the natural language request to a shell command.
+      Request: {request}
+      Available action class: {action_class}
+      Generate only the command, no explanation:
+    
+    intent_classification_prompt: |
+      Classify this terminal request into an action class:
+      Request: {request}
+      
+      Classes: auto_allowed, restricted, admin_restricted
+      
+      Consider:
+      - read_search_operations: grep, find, cat, ls (auto_allowed)
+      - file_modification: rm, mv, delete (restricted)  
+      - system_config: chmod, sudo, systemctl (admin_restricted)
+      
+      Classification:

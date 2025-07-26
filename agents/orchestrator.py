@@ -912,11 +912,13 @@ Current working context: {user_prompt[:200]}..."""
                 secondary_str = ", ".join([f"{intent}({score:.2f})" for intent, score in classification.secondary_intents])
                 print(f"   Secondary intents: {secondary_str}")
             
-            # If confidence is too low, use fallback intent
+            # Enhanced fallback logic with user clarification triggers
             if not classification.meets_threshold(0.5):
-                print("⚠️ Low confidence classification, using general fallback")
-                classification.primary_intent = 'general_query'
-                classification.confidence = 0.3
+                print("⚠️ Low confidence classification, triggering clarification logic")
+                classification = self._handle_unclear_classification(classification, user_prompt)
+            elif classification.confidence > 0.9 and self._is_potentially_misclassified(classification, user_prompt):
+                print("🔍 High confidence but potential misclassification detected")
+                classification = self._apply_high_confidence_validation(classification, user_prompt)
             
             # Build plan based on classification
             plan = []
@@ -1585,5 +1587,111 @@ Use the codebase context to understand existing patterns and maintain consistenc
         except Exception as e:
             print(f"❌ Error during ProjectManager cleanup: {e}")
     
+    def _handle_unclear_classification(self, classification, user_prompt: str):
+        """
+        Handle cases where classification confidence is too low.
+        
+        This method implements fallback logic for unclear intent classifications,
+        including potential user clarification triggers.
+        """
+        from src.inference.intent_classifier import IntentClassification
+        
+        # Analyze why confidence is low
+        prompt_lower = user_prompt.lower()
+        
+        # Check for multiple conflicting intents in the prompt
+        intent_indicators = {
+            'web_research': ['website', 'web', 'external', 'fetch', 'scrape'],
+            'code_generation': ['create', 'generate', 'build', 'implement'],
+            'code_editing': ['fix', 'modify', 'change', 'update', 'edit'],
+            'code_analysis': ['analyze', 'review', 'check', 'audit'],
+            'documentation': ['document', 'explain', 'describe'],
+            'tool_execution': ['run', 'execute', 'test', 'perform'],
+            'codebase_query': ['find', 'where', 'how', 'what', 'show']
+        }
+        
+        detected_intents = []
+        for intent, indicators in intent_indicators.items():
+            if any(indicator in prompt_lower for indicator in indicators):
+                detected_intents.append(intent)
+        
+        if len(detected_intents) >= 2:
+            print(f"🔄 Multiple intents detected: {detected_intents}")
+            # For now, use the first detected intent as primary
+            # In future, could trigger user clarification here
+            primary_intent = detected_intents[0]
+            confidence = 0.6  # Medium confidence for multi-intent prompts
+            
+            return IntentClassification(
+                primary_intent=primary_intent,
+                confidence=confidence,
+                secondary_intents=[(intent, 0.4) for intent in detected_intents[1:2]],  # Take first secondary
+                metadata={'fallback_reason': 'multiple_intents_detected', 'detected_intents': detected_intents}
+            )
+        
+        # Default fallback to general query
+        print("🔄 Using general fallback for unclear classification")
+        return IntentClassification(
+            primary_intent='general_query',
+            confidence=0.3,
+            secondary_intents=[],
+            metadata={'fallback_reason': 'low_confidence', 'original_intent': classification.primary_intent}
+        )
+    
+    def _is_potentially_misclassified(self, classification, user_prompt: str) -> bool:
+        """
+        Check if a high-confidence classification might be wrong based on known patterns.
+        """
+        prompt_lower = user_prompt.lower()
+        intent = classification.primary_intent
+        
+        # Known confusion patterns from failure analysis
+        
+        # documentation classified but has external source indicators
+        if intent == "documentation" and any(indicator in prompt_lower for indicator in ["website", "external", "fetch", "get from"]):
+            return True
+            
+        # code_analysis classified but has action verbs
+        if intent == "code_analysis" and any(action in prompt_lower for action in ["run", "execute", "fix", "modify"]):
+            return True
+            
+        return False
+    
+    def _apply_high_confidence_validation(self, classification, user_prompt: str):
+        """
+        Apply validation rules for high-confidence classifications that might be wrong.
+        """
+        from src.inference.intent_classifier import IntentClassification
+        
+        prompt_lower = user_prompt.lower()
+        original_intent = classification.primary_intent
+        
+        # Apply correction rules
+        corrected_intent = original_intent
+        
+        if original_intent == "documentation" and any(indicator in prompt_lower for indicator in ["website", "external", "fetch", "get from"]):
+            corrected_intent = "web_research"
+            print(f"🔧 Corrected: {original_intent} → {corrected_intent} (external source indicators)")
+            
+        elif original_intent == "code_analysis" and any(action in prompt_lower for action in ["run", "execute", "perform"]):
+            corrected_intent = "tool_execution"
+            print(f"🔧 Corrected: {original_intent} → {corrected_intent} (action verbs)")
+            
+        elif original_intent == "code_analysis" and any(action in prompt_lower for action in ["fix", "modify", "change"]):
+            corrected_intent = "code_editing"
+            print(f"🔧 Corrected: {original_intent} → {corrected_intent} (modification verbs)")
+        
+        # Return corrected classification
+        return IntentClassification(
+            primary_intent=corrected_intent,
+            confidence=classification.confidence * 0.9,  # Slight confidence reduction for correction
+            secondary_intents=classification.secondary_intents,
+            metadata={
+                'correction_applied': True,
+                'original_intent': original_intent,
+                'correction_reason': 'high_confidence_validation'
+            }
+        )
+
     def __repr__(self) -> str:
         return f"ProjectManager(agents={list(self.agents.keys())}, active_tasks={len(self.active_tasks)})" 

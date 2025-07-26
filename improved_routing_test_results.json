@@ -1,0 +1,124 @@
+{
+  "test_summary": {
+    "total_cases": 5,
+    "fixed_cases": 3,
+    "still_failing": 2,
+    "improvement_rate": 60.0,
+    "average_time": 2.0829530239105223,
+    "average_confidence": 0.882
+  },
+  "detailed_results": [
+    {
+      "test_id": "wr_001",
+      "prompt": "Get the latest Python documentation from the official website",
+      "expected_intent": "web_research",
+      "previous_result": "documentation",
+      "new_result": "web_research",
+      "confidence": 0.9,
+      "is_fixed": true,
+      "classification_time": 8.168314933776855,
+      "metadata": {
+        "classification_time": 8.168262004852295,
+        "model_used": "gemma-3n-E4B-it",
+        "prompt_type": "minimal_structured",
+        "raw_response": "web_research"
+      },
+      "category": "edge_case"
+    },
+    {
+      "test_id": "wr_002",
+      "prompt": "Fetch API information from external sources and libraries",
+      "expected_intent": "web_research",
+      "previous_result": "documentation",
+      "new_result": "web_research",
+      "confidence": 0.9,
+      "is_fixed": true,
+      "classification_time": 0.5822699069976807,
+      "metadata": {
+        "classification_time": 0.582261323928833,
+        "model_used": "gemma-3n-E4B-it",
+        "prompt_type": "minimal_structured",
+        "raw_response": "web_research"
+      },
+      "category": "edge_case"
+    },
+    {
+      "test_id": "te_001",
+      "prompt": "Execute all unit tests and report any failures",
+      "expected_intent": "tool_execution",
+      "previous_result": "code_analysis",
+      "new_result": "tool_execution",
+      "confidence": 0.9,
+      "is_fixed": true,
+      "classification_time": 0.544593334197998,
+      "metadata": {
+        "classification_time": 0.5445871353149414,
+        "model_used": "gemma-3n-E4B-it",
+        "prompt_type": "minimal_structured",
+        "raw_response": "tool_execution"
+      },
+      "category": "edge_case"
+    },
+    {
+      "test_id": "te_003",
+      "prompt": "Test this function with various input values",
+      "expected_intent": "tool_execution",
+      "previous_result": "code_analysis",
+      "new_result": "code_analysis",
+      "confidence": 0.9,
+      "is_fixed": false,
+      "classification_time": 0.5194699764251709,
+      "metadata": {
+        "classification_time": 0.5194637775421143,
+        "model_used": "gemma-3n-E4B-it",
+        "prompt_type": "minimal_structured",
+        "raw_response": "code_analysis"
+      },
+      "category": "edge_case"
+    },
+    {
+      "test_id": "amb_004",
+      "prompt": "Find and fix performance issues in the code",
+      "expected_intent": "code_editing",
+      "previous_result": "code_analysis",
+      "new_result": "tool_execution",
+      "confidence": 0.81,
+      "is_fixed": false,
+      "classification_time": 0.6001169681549072,
+      "metadata": {
+        "classification_time": 0.6001119613647461,
+        "model_used": "gemma-3n-E4B-it",
+        "prompt_type": "minimal_structured",
+        "raw_response": "code_analysis"
+      },
+      "category": "ambiguous"
+    }
+  ],
+  "analysis": {
+    "fixed_patterns": {
+      "web_research (was documentation)": [
+        "wr_001",
+        "wr_002"
+      ],
+      "tool_execution (was code_analysis)": [
+        "te_001"
+      ]
+    },
+    "still_failing_patterns": {
+      "tool_execution (was code_analysis)": [
+        {
+          "test_id": "te_003",
+          "new_result": "code_analysis"
+        }
+      ],
+      "code_editing (was code_analysis)": [
+        {
+          "test_id": "amb_004",
+          "new_result": "tool_execution"
+        }
+      ]
+    },
+    "corrections_applied": 0,
+    "correction_details": []
+  }
+}

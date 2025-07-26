@@ -1,0 +1,42 @@
+{
+  "analysis_summary": {
+    "total_failures": 3,
+    "failure_rate": 37.5,
+    "main_failure_types": [
+      "web_research_confusion",
+      "query_vs_analysis_confusion",
+      "execution_vs_analysis_confusion"
+    ]
+  },
+  "improvement_strategies": {
+    "web_research_improvements": [
+      "Add explicit 'research', 'history', 'information retrieval' keywords",
+      "Distinguish between 'insert summary' (web research) vs 'modify code' (editing)",
+      "Include examples of external data retrieval vs code modification",
+      "Emphasize web/external source indicators"
+    ],
+    "tool_execution_improvements": [
+      "Clarify 'run', 'execute', 'test' as action keywords vs 'analyze' as inspection",
+      "Distinguish between performing actions vs examining code",
+      "Add examples showing execution commands vs analysis requests",
+      "Emphasize result generation vs quality assessment"
+    ],
+    "codebase_query_improvements": [
+      "Distinguish 'explain how X works' (query) vs 'analyze quality' (analysis)",
+      "Clarify understanding requests vs quality assessment",
+      "Add examples of knowledge queries vs code evaluation",
+      "Emphasize comprehension vs critique"
+    ],
+    "general_improvements": [
+      "Provide mutually exclusive intent definitions",
+      "Include negative examples (what each intent is NOT)",
+      "Add keyword indicators for each intent type",
+      "Maintain minimal prompt length while adding specificity"
+    ]
+  },
+  "improved_prompt_candidates": [
+    "Classify user request into ONE intent:\n\nweb_research: Get external info (NOT code modification)\ncodebase_query: Understand code (NOT quality evaluation)  \ncode_generation: Create new code (NOT modify existing)\ncode_editing: Modify existing code (NOT create new)\ncode_analysis: Evaluate quality (NOT understand logic)\ndocumentation: Add docs/comments (NOT code changes)\ntool_execution: Run/execute/test (NOT inspect/analyze)\n\nRequest: {prompt}\n\nIntent:",
+    "Intent classification for: {prompt}\n\nCategories with key indicators:\n\u2022 web_research: research, history, fetch, external, web\n\u2022 codebase_query: explain, how works, find, understand  \n\u2022 code_generation: create, new, add, build, implement\n\u2022 code_editing: optimize, fix, modify, update, refactor\n\u2022 code_analysis: analyze, quality, structure, review\n\u2022 documentation: docstring, comment, document, explain usage\n\u2022 tool_execution: run, execute, test, command\n\nChoose the best match:",
+    "What does the user want to DO?\n\n{prompt}\n\nPick ONE action type:\nweb_research = get info from external sources\ncodebase_query = understand existing code logic\ncode_generation = write new code from scratch\ncode_editing = change/improve existing code\ncode_analysis = check code quality/structure  \ndocumentation = add explanations/comments\ntool_execution = run/test/execute code\n\nAnswer:"
+  ]
+}

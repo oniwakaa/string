@@ -116,7 +116,7 @@ intents:
     description: "General questions or unclear requests that need context"
     primary_agent: "codebase_expert"
     fallback_agent: "code_generator"
-    confidence_threshold: 0.3
+    confidence_threshold: 0.5  # Aligned with codebase_query for consistency
     is_fallback: true
 
 # Intent combinations and workflows
@@ -188,6 +188,43 @@ confidence_adjustments:
   
   # Language consistency bonus
   consistent_language: 0.05
+
+# Fallback and clarification rules
+fallback_logic:
+  # Low confidence thresholds
+  low_confidence_threshold: 0.5
+  
+  # High confidence validation threshold
+  high_confidence_threshold: 0.9
+  
+  # Fallback strategies
+  strategies:
+    low_confidence:
+      action: "analyze_multi_intent"
+      fallback_agent: "codebase_expert"
+      
+    high_confidence_suspicious:
+      action: "apply_validation_rules"
+      validation_rules:
+        - pattern: "documentation + external_indicators"
+          correction: "web_research"
+        - pattern: "code_analysis + action_verbs"
+          correction: "tool_execution"
+        - pattern: "code_analysis + modification_verbs"
+          correction: "code_editing"
+    
+    ambiguous_multi_step:
+      action: "detect_primary_intent"
+      trigger_keywords: ["and", "then", "also", "plus"]
+      
+  # User clarification triggers (for future implementation)
+  clarification_triggers:
+    - condition: "confidence < 0.4"
+      message: "I'm not sure what you want me to do. Could you clarify if you want me to: [list top 2 likely intents]?"
+    - condition: "multiple_intents_detected >= 3"
+      message: "Your request involves multiple actions. Should I focus on: [list detected intents]?"
+    - condition: "high_confidence_but_corrected"
+      message: "I detected some conflicting signals in your request. Did you mean: [corrected intent]?"
 
 # Agent metadata for routing decisions
 agents:

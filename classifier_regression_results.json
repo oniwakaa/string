@@ -1,0 +1,51 @@
+{
+  "test_summary": {
+    "total_cases": 32,
+    "passed_cases": 27,
+    "failed_cases": 5,
+    "accuracy": 84.375,
+    "average_time": 0.702335000038147,
+    "average_confidence": 0.8999999999999995
+  },
+  "results_by_category": {
+    "known_failure": {
+      "accuracy": 100.0,
+      "passed": 3,
+      "total": 3
+    },
+    "edge_case": {
+      "accuracy": 75.0,
+      "passed": 9,
+      "total": 12
+    },
+    "standard": {
+      "accuracy": 92.3076923076923,
+      "passed": 12,
+      "total": 13
+    },
+    "ambiguous": {
+      "accuracy": 75.0,
+      "passed": 3,
+      "total": 4
+    }
+  },
+  "results_by_difficulty": {
+    "hard": {
+      "accuracy": 85.71428571428571,
+      "passed": 6,
+      "total": 7
+    },
+    "medium": {
+      "accuracy": 72.72727272727273,
+      "passed": 8,
+      "total": 11
+    },
+    "easy": {
+      "accuracy": 92.85714285714286,
+      "passed": 13,
+      "total": 14
+    }
+  },
+  "failed_cases": [
+    {
+      "test_case": 
