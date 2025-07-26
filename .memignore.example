@@ -1,0 +1,110 @@
+# .memignore - Control which files are loaded into AI memory
+# This file uses .gitignore-style patterns to exclude files/directories
+# Lines starting with # are comments
+
+# Version control and meta directories
+.git/
+.svn/
+.hg/
+
+# Python specific
+__pycache__/
+*.pyc
+*.pyo
+venv/
+.venv/
+env/
+.env/
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.mypy_cache/
+
+# Node.js specific  
+node_modules/
+npm-debug.log
+yarn-debug.log
+yarn-error.log
+.npm/
+.yarn/
+
+# Build outputs
+build/
+dist/
+out/
+target/
+bin/
+obj/
+
+# IDE and editor files
+.vscode/
+.idea/
+.vs/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# Logs and temporary files
+*.log
+logs/
+tmp/
+temp/
+.tmp/
+.temp/
+
+# Large binary files
+*.zip
+*.tar.gz
+*.rar
+*.7z
+*.pdf
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.mp4
+*.mp3
+*.avi
+
+# Data and model files (often large)
+data/
+datasets/
+models/
+weights/
+*.db
+*.sqlite
+*.sqlite3
+
+# Test artifacts
+coverage/
+.nyc_output/
+test-results/
+.jest/
+
+# Documentation build artifacts
+_site/
+_build/
+.jekyll-cache/
+docs/_build/
+
+# Cache directories
+cache/
+.cache/
+.sass-cache/
+
+# Database storage
+qdrant_storage/
+
+# Example patterns for advanced usage:
+# Include specific files even if parent directory is excluded:
+# !important-config.json
+
+# Exclude all .txt files except readme:
+# *.txt
+# !readme.txt
+
+# Exclude by file size (handled by filter logic, not patterns)
+# Use additional_patterns parameter for dynamic exclusions

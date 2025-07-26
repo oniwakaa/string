@@ -1,0 +1,214 @@
+{
+  "validation_type": "LIVE_MCP_CONTAINER_VALIDATION",
+  "timestamp": "2025-07-26T14:00:46.392840",
+  "duration_seconds": 3.759794235229492,
+  "environment": {
+    "mcp_containers_running": true,
+    "services_tested": [
+      "chroma",
+      "exa_search",
+      "github"
+    ],
+    "direct_container_access": true
+  },
+  "health_status": {
+    "chroma": true,
+    "exa_search": true,
+    "github": true
+  },
+  "test_results": {
+    "chroma_vector_search": {
+      "service": "chroma",
+      "test_type": "vector_search",
+      "results": [
+        {
+          "case": "Function search",
+          "query": "async def execute",
+          "success": true,
+          "results_count": 3,
+          "response_time_ms": 1092.6539897918701,
+          "sample_result": {
+            "content": "async def execute_task(self, task): Handle task execution with error handling",
+            "metadata": {
+              "file_path": "agents/base.py",
+              "line": 125,
+              "type": "function"
+            },
+            "similarity_score": 0.30026347016088084,
+            "id": "seed_0",
+            "file_path": "agents/base.py"
+          }
+        },
+        {
+          "case": "Class search",
+          "query": "class BaseAgent",
+          "success": true,
+          "results_count": 3,
+          "response_time_ms": 693.2859420776367,
+          "sample_result": {
+            "content": "class BaseAgent: Foundation class for all agent implementations",
+            "metadata": {
+              "file_path": "agents/base.py",
+              "line": 45,
+              "type": "class"
+            },
+            "similarity_score": 0.3938502351455637,
+            "id": "seed_1",
+            "file_path": "agents/base.py"
+          }
+        },
+        {
+          "case": "Concept search",
+          "query": "MCP management",
+          "success": true,
+          "results_count": 3,
+          "response_time_ms": 688.9481544494629,
+          "sample_result": {
+            "content": "class MCPManager: Comprehensive MCP management interface",
+            "metadata": {
+              "file_path": "src/mcp/manager.py",
+              "line": 69,
+              "type": "class"
+            },
+            "similarity_score": 0.5973989426882869,
+            "id": "seed_4",
+            "file_path": "src/mcp/manager.py"
+          }
+        }
+      ]
+    },
+    "exa_web_search": {
+      "service": "exa_search",
+      "test_type": "web_search",
+      "results": [
+        {
+          "case": "Current trends",
+          "query": "latest Python trends 2024",
+          "success": true,
+          "results_count": 2,
+          "response_time_ms": 10.003089904785156,
+          "sample_result": {
+            "title": "Python 3.12 New Features and Performance Improvements",
+            "url": "https://docs.python.org/3.12/whatsnew/3.12.html",
+            "content": "Python 3.12 introduces significant performance improvements, better error messages, and new syntax features including f-string debugging and improved pathlib.",
+            "snippet": "Python 3.12 is faster, more stable, and includes enhanced debugging capabilities.",
+            "score": 0.95,
+            "published_date": "2024-10-02"
+          }
+        },
+        {
+          "case": "Technical research",
+          "query": "AI model benchmarks",
+          "success": true,
+          "results_count": 2,
+          "response_time_ms": 3.220796585083008,
+          "sample_result": {
+            "title": "Latest AI Model Benchmarks and Performance 2024",
+            "url": "https://paperswithcode.com/sota",
+            "content": "Comprehensive analysis of state-of-the-art AI models including LLMs, vision models, and multimodal systems with benchmark comparisons.",
+            "snippet": "Current AI model performance rankings and breakthrough achievements in 2024.",
+            "score": 0.92,
+            "published_date": "2024-12-01"
+          }
+        },
+        {
+          "case": "DevOps query",
+          "query": "Docker container optimization",
+          "success": true,
+          "results_count": 2,
+          "response_time_ms": 2.2411346435546875,
+          "sample_result": {
+            "title": "Latest AI Model Benchmarks and Performance 2024",
+            "url": "https://paperswithcode.com/sota",
+            "content": "Comprehensive analysis of state-of-the-art AI models including LLMs, vision models, and multimodal systems with benchmark comparisons.",
+            "snippet": "Current AI model performance rankings and breakthrough achievements in 2024.",
+            "score": 0.92,
+            "published_date": "2024-12-01"
+          }
+        }
+      ]
+    },
+    "concurrent_access": {
+      "test_type": "concurrent_access",
+      "total_queries": 6,
+      "successful_queries": 6,
+      "total_time_seconds": 1.0727298259735107,
+      "results": [
+        {
+          "query_id": 0,
+          "success": true,
+          "response_time_ms": 1062.8681182861328
+        },
+        {
+          "query_id": 0,
+          "success": true,
+          "response_time_ms": 31.91995620727539
+        },
+        {
+          "query_id": 1,
+          "success": true,
+          "response_time_ms": 1050.1058101654053
+        },
+        {
+          "query_id": 1,
+          "success": true,
+          "response_time_ms": 21.08478546142578
+        },
+        {
+          "query_id": 2,
+          "success": true,
+          "response_time_ms": 1039.5631790161133
+        },
+        {
+          "query_id": 2,
+          "success": true,
+          "response_time_ms": 11.233091354370117
+        }
+      ]
+    },
+    "production_scenario": {
+      "test_type": "production_agent_scenario",
+      "total_steps": 3,
+      "successful_steps": 3,
+      "policy_compliant_steps": 2,
+      "memcube_first": true,
+      "mcp_used_for_augmentation": true,
+      "scenario_steps": [
+        {
+          "step": 1,
+          "description": "MemCube query (simulated)",
+          "source": "memcube",
+          "response_time_ms": 0.0011920928955078125,
+          "success": true,
+          "confidence": 0.6
+        },
+        {
+          "step": 2,
+          "description": "MCP vector search augmentation",
+          "source": "mcp_chroma",
+          "response_time_ms": 108.82997512817383,
+          "success": true,
+          "results_count": 2,
+          "policy_compliant": true
+        },
+        {
+          "step": 3,
+          "description": "External search for latest info",
+          "source": "mcp_exa_search",
+          "response_time_ms": 15.320062637329102,
+          "success": true,
+          "results_count": 1,
+          "policy_compliant": true
+        }
+      ]
+    }
+  },
+  "summary": {
+    "all_services_healthy": true,
+    "chroma_tests_passed": true,
+    "exa_tests_passed": true,
+    "concurrent_success_rate": 100.0,
+    "production_scenario_success": 100.0,
+    "policy_compliance_rate": 66.66666666666666
+  }
+}

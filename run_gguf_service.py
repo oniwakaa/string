@@ -79,6 +79,62 @@ async def lifespan(app: FastAPI):
         
         logger.info(f"ProjectManager initialized successfully (service: {service_host}:{service_port})")
         
+        # Intelligent codebase loading with change detection
+        try:
+            logger.info("🔄 Checking codebase state for intelligent loading...")
+            current_directory = os.getcwd()
+            
+            # Import codebase state manager
+            sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'src'))
+            from core.codebase_state_manager import CodebaseStateManager
+            from core.memignore_filter import MemignoreFilter
+            
+            # Initialize state manager and filter
+            state_manager = CodebaseStateManager(current_directory)
+            memignore_filter = MemignoreFilter()
+            
+            # Get filtered files using existing .memignore logic
+            filtered_files = memignore_filter.filter_codebase_files(current_directory)
+            patterns, memignore_exists = memignore_filter.load_memignore(current_directory)
+            
+            # Check if reload is needed
+            should_reload, changes, current_manifest = state_manager.should_reload_codebase(
+                filtered_files,
+                len(patterns),
+                ".memignore-based" if memignore_exists else "default"
+            )
+            
+            if should_reload:
+                logger.info(f"📥 Loading codebase: {changes.total_changes} changes detected")
+                if changes.new_files:
+                    logger.info(f"   ➕ {len(changes.new_files)} new files")
+                if changes.modified_files:
+                    logger.info(f"   📝 {len(changes.modified_files)} modified files") 
+                if changes.deleted_files:
+                    logger.info(f"   ❌ {len(changes.deleted_files)} deleted files")
+                
+                # Perform full or incremental load
+                startup_load_result = await service.load_codebase(
+                    directory_path=current_directory,
+                    user_id="system_startup",
+                    project_id="default_startup"
+                )
+                
+                # Mark load complete
+                state_manager.mark_load_complete(current_manifest)
+                
+                files_loaded = startup_load_result.get('files_loaded', 0)
+                filtering_method = startup_load_result.get('filtering_method', 'unknown')
+                loading_time = startup_load_result.get('loading_time_seconds', 0)
+                logger.info(f"✅ Codebase loading complete: {files_loaded} files loaded in {loading_time:.2f}s using {filtering_method}")
+            else:
+                logger.info("⚡ Codebase is up to date, using existing memory context")
+                logger.info(f"   📁 {current_manifest.total_files} files in memory from previous load")
+                
+        except Exception as e:
+            logger.warning(f"⚠️ Intelligent codebase loading failed: {e}")
+            logger.info("🔍 Falling back to manual loading via /load_codebase endpoint")
+        
         # Initialize Project-Aware File Monitor
         if WATCHDOG_AVAILABLE and project_manager and project_manager.project_memory_manager:
             try:
@@ -133,7 +189,7 @@ config = load_config()
 service_config = config.get('service', {})
 api_config = service_config.get('api', {})
 
-# Create FastAPI app
+# Create FastAPI app with connection limits
 app = FastAPI(
     title=api_config.get('title', 'MemOS GGUF Service'),
     description=api_config.get('description', 'Persistent service integrating MemOS with GGUF models'),
@@ -189,28 +245,34 @@ class ServiceStatusResponse(BaseModel):
 
 
 class LoadCodebaseRequest(BaseModel):
-    """Request model for load codebase endpoint."""
+    """Request model for load codebase endpoint with .memignore-based filtering."""
     directory_path: str = Field(..., description="Path to the directory containing code files")
     user_id: Optional[str] = Field(None, description="User ID for memory context")
     project_id: Optional[str] = Field(None, description="Project ID for memory isolation")
-    file_extensions: Optional[list[str]] = Field(None, description="File extensions to include (default: common code extensions)")
-    exclude_dirs: Optional[list[str]] = Field(None, description="Directory names to exclude (default: common excluded dirs)")
+    custom_memignore_path: Optional[str] = Field(None, description="Custom path to .memignore file")
+    additional_patterns: Optional[list[str]] = Field(None, description="Additional exclusion patterns to apply")
 
 
 class LoadCodebaseResponse(BaseModel):
-    """Response model for load codebase endpoint."""
+    """Response model for load codebase endpoint with .memignore-based filtering."""
     status: str = Field(..., description="Status of the loading operation")
     directory_path: str = Field(..., description="Path that was processed")
     user_id: str = Field(..., description="User ID used for memory context")
+    project_id: str = Field(..., description="Project ID used for memory isolation")
+    cube_id: Optional[str] = Field(None, description="MemCube ID used for storage")
     files_loaded: int = Field(..., description="Number of files successfully loaded")
-    files_skipped: int = Field(..., description="Number of files skipped")
+    files_failed: int = Field(..., description="Number of files that failed to load")
     total_size_bytes: int = Field(..., description="Total size in bytes of processed files")
     loading_time_seconds: float = Field(..., description="Time taken for loading")
     timestamp: str = Field(..., description="Processing timestamp")
+    filtering_method: str = Field(..., description="Filtering method used (e.g., '.memignore-based')")
+    memignore_exists: bool = Field(..., description="Whether a .memignore file was found")
+    memignore_patterns_count: int = Field(..., description="Number of patterns applied")
+    inclusion_rate: float = Field(..., description="Ratio of files included vs found")
+    success_rate: float = Field(..., description="Ratio of files loaded vs included")
+    filtering_stats: Dict[str, Any] = Field(..., description="Detailed filtering statistics")
     loaded_files: list[Dict[str, Any]] = Field(..., description="Details of loaded files (first 100)")
-    skipped_files: list[Dict[str, Any]] = Field(..., description="Details of skipped files (first 50)")
-    file_extensions_processed: list[str] = Field(..., description="File extensions that were processed")
-    excluded_directories: list[str] = Field(..., description="Directories that were excluded")
+    failed_files: list[Dict[str, Any]] = Field(..., description="Details of failed files (first 50)")
     error: Optional[str] = Field(None, description="Error message if status is 'error'")
 
 
@@ -396,8 +458,8 @@ async def load_codebase(request: LoadCodebaseRequest):
             directory_path=request.directory_path,
             user_id=request.user_id,
             project_id=request.project_id,
-            file_extensions=request.file_extensions,
-            exclude_dirs=request.exclude_dirs
+            custom_memignore_path=request.custom_memignore_path,
+            additional_patterns=request.additional_patterns
         )
         
         return LoadCodebaseResponse(**result)
@@ -802,6 +864,20 @@ def main():
     # Setup signal handlers
     setup_signal_handlers()
     
+    # Check system resource limits
+    import resource
+    soft_limit, hard_limit = resource.getrlimit(resource.RLIMIT_NOFILE)
+    logger.info(f"🔧 File descriptor limits: soft={soft_limit}, hard={hard_limit}")
+    
+    # Increase soft limit if possible
+    if soft_limit < 8192 and hard_limit > soft_limit:
+        try:
+            new_soft = min(8192, hard_limit)
+            resource.setrlimit(resource.RLIMIT_NOFILE, (new_soft, hard_limit))
+            logger.info(f"🔧 Increased file descriptor soft limit to {new_soft}")
+        except Exception as e:
+            logger.warning(f"Could not increase file descriptor limit: {e}")
+    
     # Get service configuration
     host = api_config.get('host', '0.0.0.0')
     port = api_config.get('port', 8000)
@@ -813,14 +889,22 @@ def main():
     logger.info(f"Model path: {config.get('model', {}).get('model_path', 'Not specified')}")
     logger.info(f"Memory retrieval enabled: {config.get('memory', {}).get('retrieval', {}).get('enabled', True)}")
     
-    # Run the service
+    # Run the service with optimized concurrency settings
     uvicorn.run(
         app,
         host=host,
         port=port,
         log_level=log_level,
         access_log=True,
-        reload=False  # Disable reload for production
+        reload=False,  # Disable reload for production
+        workers=1,  # Single worker for model sharing (important for GGUF)
+        limit_concurrency=100,  # Increased concurrent requests for testing
+        limit_max_requests=2000,  # Restart worker after max requests
+        timeout_keep_alive=60,  # Increased keep-alive timeout
+        timeout_graceful_shutdown=60,  # Graceful shutdown timeout
+        loop="asyncio",  # Explicit asyncio loop
+        h11_max_incomplete_event_size=16 * 1024 * 1024,  # 16MB for large requests
+        backlog=2048  # Increased connection backlog
     )
 
 

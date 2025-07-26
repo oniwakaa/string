@@ -638,21 +638,24 @@ class GGUFMemoryService:
         directory_path: str,
         user_id: Optional[str] = None,
         project_id: Optional[str] = None,
-        file_extensions: Optional[List[str]] = None,
-        exclude_dirs: Optional[List[str]] = None
+        custom_memignore_path: Optional[str] = None,
+        additional_patterns: Optional[List[str]] = None
     ) -> Dict[str, Any]:
         """
-        Load a directory of code files into MemOS for enhanced code retrieval.
+        Load a directory of code files into MemOS using .memignore-based filtering.
+        
+        This method provides complete user control over file inclusion/exclusion through
+        .memignore files, replacing the old universal filtering approach.
         
         Args:
             directory_path (str): Path to the directory containing code files
             user_id (Optional[str]): User ID for memory context
             project_id (Optional[str]): Project ID for memory isolation (default: "default")
-            file_extensions (Optional[List[str]]): File extensions to include
-            exclude_dirs (Optional[List[str]]): Directory names to exclude
+            custom_memignore_path (Optional[str]): Custom path to .memignore file
+            additional_patterns (Optional[List[str]]): Additional exclusion patterns
             
         Returns:
-            Dict[str, Any]: Loading operation results
+            Dict[str, Any]: Loading operation results with comprehensive filtering stats
         """
         if not self._is_initialized:
             raise RuntimeError("Service not initialized. Call startup() first.")
@@ -660,24 +663,28 @@ class GGUFMemoryService:
         if not MEMOS_AVAILABLE or not self.mos_instance:
             raise RuntimeError("MemOS not available - cannot load codebase")
         
+        # Import .memignore filter
+        try:
+            from src.core.memignore_filter import MemignoreFilter
+        except ImportError as e:
+            logger.error(f"❌ Failed to import MemignoreFilter: {e}")
+            raise RuntimeError("MemignoreFilter not available - install pathspec with: pip install pathspec")
+        
         start_time = datetime.now()
-        
-        # Default file extensions for code files
-        if file_extensions is None:
-            file_extensions = ['.py', '.js', '.ts', '.jsx', '.tsx', '.java', '.cpp', '.c', '.h', '.hpp', 
-                             '.cs', '.php', '.rb', '.go', '.rs', '.swift', '.kt', '.scala', '.r', '.m', 
-                             '.sql', '.sh', '.bash', '.yaml', '.yml', '.json', '.xml', '.html', '.css', 
-                             '.md', '.txt', '.cfg', '.ini', '.conf']
-        
-        # Default excluded directories
-        if exclude_dirs is None:
-            exclude_dirs = ['node_modules', '.git', '__pycache__', '.pytest_cache', 'venv', 'env', 
-                           '.venv', 'build', 'dist', '.next', '.nuxt', 'target', 'bin', 'obj', 
-                           '.idea', '.vscode', 'coverage', '.coverage', '.nyc_output', 'logs']
         
         # Get effective user ID and project ID
         effective_user_id = user_id or self.config.get('memos', {}).get('user_id', 'default_user')
         effective_project_id = project_id or "default"
+        
+        logger.info(f"🚀 [Load Codebase] Starting .memignore-based codebase loading")
+        logger.info(f"📂 [Load Codebase] Directory: {directory_path}")
+        logger.info(f"👤 [Load Codebase] User ID: {effective_user_id}")
+        logger.info(f"🏗️ [Load Codebase] Project ID: {effective_project_id}")
+        logger.info(f"🔧 [Load Codebase] Custom .memignore: {custom_memignore_path or 'None'}")
+        logger.info(f"➕ [Load Codebase] Additional patterns: {len(additional_patterns or [])}")
+        
+        # Initialize .memignore filter
+        memignore_filter = MemignoreFilter()
         
         # Get project-specific MemCube via ResourceManager - THE CRITICAL FIX
         project_mem_cube = None
@@ -783,139 +790,167 @@ class GGUFMemoryService:
         if not os.path.isdir(directory_path):
             raise ValueError(f"Path is not a directory: {directory_path}")
         
-        logger.info(f"🚀 [Load Codebase] Starting to load codebase from: {directory_path}")
-        logger.info(f"📂 [Load Codebase] User ID: {effective_user_id}")
-        logger.info(f"🏗️ [Load Codebase] Project ID: {effective_project_id}")
-        logger.info(f"🔍 [Load Codebase] Extensions: {file_extensions}")
-        logger.info(f"🚫 [Load Codebase] Excluded dirs: {exclude_dirs}")
-        
-        loaded_files = []
-        skipped_files = []
-        total_size_bytes = 0
-        
         try:
-            # Walk through the directory structure
-            for root, dirs, files in os.walk(directory_path):
-                # Skip excluded directories
-                dirs[:] = [d for d in dirs if d not in exclude_dirs]
-                
-                for file in files:
-                    file_path = os.path.join(root, file)
-                    relative_path = os.path.relpath(file_path, directory_path)
+            # Use .memignore filtering to get list of files to load
+            filtered_files = memignore_filter.filter_codebase_files(
+                project_root=directory_path,
+                custom_memignore_path=custom_memignore_path,
+                additional_patterns=additional_patterns
+            )
+            
+            # Get filtering statistics
+            filter_stats = memignore_filter.get_filtering_stats()
+            
+            logger.info(f"🔍 [Filtering] Found {len(filtered_files)} files to load after .memignore filtering")
+            
+            # Check if .memignore exists to provide user feedback
+            from pathlib import Path
+            memignore_path = Path(directory_path) / ".memignore"
+            memignore_exists = memignore_path.exists()
+            
+            if not memignore_exists and filter_stats.total_files_found > 1000:
+                logger.warning("💡 [Tip] Large codebase detected with no .memignore file.")
+                logger.warning("   Consider creating a .memignore file to exclude unwanted files and improve performance.")
+                logger.warning("   Example: echo 'node_modules/\\n__pycache__/\\n*.log' > .memignore")
+            
+            # Load filtered files into memory
+            loaded_files = []
+            failed_files = []
+            total_size_bytes = 0
+            
+            for file_path in filtered_files:
+                try:
+                    # Read file content
+                    with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+                        content = f.read()
                     
-                    # Check file extension
-                    file_ext = os.path.splitext(file)[1].lower()
-                    if file_ext not in file_extensions:
-                        skipped_files.append({
-                            'path': relative_path,
-                            'reason': f'Extension {file_ext} not in allowed list'
+                    # Skip empty files
+                    if not content.strip():
+                        failed_files.append({
+                            'path': str(file_path.relative_to(directory_path)),
+                            'reason': 'Empty file'
                         })
                         continue
                     
-                    try:
-                        # Read file content
-                        with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
-                            content = f.read()
-                        
-                        # Skip empty files
-                        if not content.strip():
-                            skipped_files.append({
+                    # Get file info
+                    relative_path = str(file_path.relative_to(directory_path))
+                    file_ext = file_path.suffix.lower()
+                    file_size = len(content.encode('utf-8'))
+                    total_size_bytes += file_size
+                    
+                    # Format content for memory storage
+                    memory_content = f"File: {relative_path}\nPath: {file_path}\nExtension: {file_ext}\nContent:\n{content}"
+                    
+                    # Create memory item
+                    if project_mem_cube and project_mem_cube.text_mem:
+                        try:
+                            from memos.memories.textual.item import TextualMemoryItem, TextualMemoryMetadata
+                            
+                            metadata_obj = TextualMemoryMetadata(
+                                type='fact',
+                                source='file',
+                                memory_time=datetime.now().strftime('%Y-%m-%d'),
+                                tags=['code', 'file', file_ext.lstrip('.') if file_ext else 'no-ext'],
+                                entities=[file_path.name],
+                                confidence=100.0,
+                                visibility='private',
+                                updated_at=datetime.now().isoformat()
+                            )
+                            
+                            memory_item = TextualMemoryItem(
+                                memory=memory_content,
+                                metadata=metadata_obj
+                            )
+                            
+                            # Add to MemCube
+                            project_mem_cube.text_mem.add([memory_item])
+                            
+                            loaded_files.append({
                                 'path': relative_path,
-                                'reason': 'Empty file'
+                                'size_bytes': file_size,
+                                'extension': file_ext
+                            })
+                            
+                            logger.debug(f"✅ [Memory] Added: {relative_path} ({file_size} bytes)")
+                            
+                        except Exception as e:
+                            logger.warning(f"⚠️ [Memory] Failed to add {relative_path}: {e}")
+                            failed_files.append({
+                                'path': relative_path,
+                                'reason': f'Memory error: {str(e)}'
                             })
                             continue
-                        
-                        # Get file size
-                        file_size = len(content.encode('utf-8'))
-                        total_size_bytes += file_size
-                        
-                        # Format content for memory storage
-                        memory_content = f"File: {relative_path}\nPath: {file_path}\nExtension: {file_ext}\nContent:\n{content}"
-                        
-                        # Create memory item with only valid TextualMemoryMetadata fields
-                        memory_data = {
-                            'memory': memory_content,
-                            'metadata': {
-                                'type': 'fact',  # Must be one of: procedure, fact, event, opinion, topic, reasoning
-                                'source': 'file',  # Must be one of: conversation, retrieved, web, file
-                                'memory_time': datetime.now().strftime('%Y-%m-%d'),  # Must be YYYY-MM-DD format
-                                'tags': ['code', 'file', file_ext.lstrip('.')],
-                                'entities': [os.path.basename(file_path)],
-                                'status': 'activated'
-                            }
-                        }
-                        
-                        # Add memory using ResourceManager's project-specific MemCube - THE CRITICAL FIX
-                        if project_mem_cube and project_mem_cube.text_mem:
-                            try:
-                                # Use ResourceManager's shared MemCube with proper document format
-                                from memos.memories.textual.item import TextualMemoryItem
-                                
-                                # Create metadata object first
-                                from memos.memories.textual.item import TextualMemoryMetadata
-                                
-                                metadata_obj = TextualMemoryMetadata(**memory_data['metadata'])
-                                
-                                memory_item = TextualMemoryItem(
-                                    memory=memory_content,
-                                    metadata=metadata_obj
-                                )
-                                
-                                # Add directly to the textual memory tier of ResourceManager's MemCube
-                                project_mem_cube.text_mem.add([memory_item])
-                                
-                                logger.debug(f"✅ [ResourceManager] Added to project MemCube: {relative_path}")
-                            except Exception as e:
-                                logger.warning(f"⚠️ [ResourceManager] Failed to add {relative_path}: {e}")
-                                # Continue processing other files
-                                continue
-                        else:
-                            # Fallback: Skip file if no proper MemCube available
-                            logger.warning(f"⚠️ [Skip] No ResourceManager MemCube available for {relative_path}")
-                            skipped_files.append({
-                                'path': relative_path,
-                                'reason': 'ResourceManager MemCube not available'
-                            })
-                            continue
-                        
-                        loaded_files.append({
+                    else:
+                        logger.warning(f"⚠️ [Skip] No MemCube available for {relative_path}")
+                        failed_files.append({
                             'path': relative_path,
-                            'size_bytes': file_size,
-                            'extension': file_ext
-                        })
-                        
-                        logger.debug(f"✅ [Load Codebase] Loaded: {relative_path} ({file_size} bytes)")
-                        
-                    except Exception as e:
-                        logger.warning(f"⚠️ [Load Codebase] Failed to load {relative_path}: {e}")
-                        skipped_files.append({
-                            'path': relative_path,
-                            'reason': f'Read error: {str(e)}'
+                            'reason': 'No MemCube available'
                         })
                         continue
+                        
+                except Exception as e:
+                    logger.warning(f"⚠️ [Load] Failed to process {file_path}: {e}")
+                    failed_files.append({
+                        'path': str(file_path.relative_to(directory_path)) if file_path else 'unknown',
+                        'reason': f'Processing error: {str(e)}'
+                    })
+                    continue
             
             end_time = datetime.now()
             loading_time = (end_time - start_time).total_seconds()
             
+            # Calculate efficiency metrics
+            if filter_stats.total_files_found > 0:
+                inclusion_rate = filter_stats.total_files_included / filter_stats.total_files_found
+            else:
+                inclusion_rate = 0.0
+                
+            success_rate = len(loaded_files) / len(filtered_files) if filtered_files else 0.0
+            
             logger.info(f"✅ [Load Codebase] Completed successfully!")
-            logger.info(f"📊 [Load Codebase] Files loaded: {len(loaded_files)}")
-            logger.info(f"📊 [Load Codebase] Files skipped: {len(skipped_files)}")
-            logger.info(f"📊 [Load Codebase] Total size: {total_size_bytes:,} bytes")
-            logger.info(f"⏱️ [Load Codebase] Loading time: {loading_time:.2f}s")
+            logger.info(f"📊 [Results] Files loaded: {len(loaded_files)}")
+            logger.info(f"📊 [Results] Files failed: {len(failed_files)}")
+            logger.info(f"📊 [Results] Total size: {total_size_bytes:,} bytes ({total_size_bytes / 1024 / 1024:.1f} MB)")
+            logger.info(f"📊 [Results] Inclusion rate: {inclusion_rate:.1%}")
+            logger.info(f"📊 [Results] Success rate: {success_rate:.1%}")
+            logger.info(f"⏱️ [Results] Total time: {loading_time:.2f}s")
+            
+            # User feedback on results
+            if len(loaded_files) == 0:
+                logger.warning("🚨 No files were loaded! Check your .memignore patterns.")
+            elif inclusion_rate < 0.1:
+                logger.warning(f"⚠️ Very low inclusion rate ({inclusion_rate:.1%}). Review .memignore patterns.")
+            elif len(loaded_files) > 5000:
+                logger.info("💡 Large number of files loaded. Consider adding more exclusion patterns for better performance.")
             
             return {
                 'status': 'success',
                 'directory_path': directory_path,
                 'user_id': effective_user_id,
+                'project_id': effective_project_id,
+                'cube_id': cube_id,
                 'files_loaded': len(loaded_files),
-                'files_skipped': len(skipped_files),
+                'files_failed': len(failed_files),
                 'total_size_bytes': total_size_bytes,
                 'loading_time_seconds': loading_time,
                 'timestamp': end_time.isoformat(),
-                'loaded_files': loaded_files[:100],  # Limit to first 100 for response size
-                'skipped_files': skipped_files[:50],  # Limit to first 50 for response size
-                'file_extensions_processed': file_extensions,
-                'excluded_directories': exclude_dirs
+                'filtering_method': '.memignore-based',
+                'memignore_exists': memignore_exists,
+                'memignore_patterns_count': len(filter_stats.memignore_patterns_used),
+                'inclusion_rate': inclusion_rate,
+                'success_rate': success_rate,
+                'filtering_stats': {
+                    'total_files_found': filter_stats.total_files_found,
+                    'total_files_included': filter_stats.total_files_included,
+                    'total_files_excluded': filter_stats.total_files_excluded,
+                    'total_size_included_mb': filter_stats.total_size_included / 1024 / 1024,
+                    'total_size_excluded_mb': filter_stats.total_size_excluded / 1024 / 1024,
+                    'processing_time_seconds': filter_stats.processing_time_seconds,
+                    'exclusion_breakdown': dict(filter_stats.exclusion_reasons),
+                    'memignore_patterns': filter_stats.memignore_patterns_used[:20]  # Limit for response size
+                },
+                'loaded_files': loaded_files[:100],  # Limit response size
+                'failed_files': failed_files[:50]    # Limit response size
             }
             
         except Exception as e:

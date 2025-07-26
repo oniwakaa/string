@@ -1,0 +1,249 @@
+# Codebase Filtering Configuration
+# This configuration prevents MemOS embedding loops by intelligently filtering files
+
+# Cross-language source file extensions
+source_extensions:
+  python: [".py", ".pyw", ".pyi"]
+  javascript: [".js", ".jsx", ".mjs", ".cjs"]
+  typescript: [".ts", ".tsx", ".d.ts"]
+  java: [".java", ".kt", ".scala"]
+  cpp: [".cpp", ".cxx", ".cc", ".c", ".h", ".hpp", ".hxx"]
+  csharp: [".cs", ".vb"]
+  go: [".go"]
+  rust: [".rs"]
+  php: [".php", ".phtml"]
+  ruby: [".rb", ".rake"]
+  swift: [".swift"]
+  dart: [".dart"]
+  kotlin: [".kt", ".kts"]
+  r: [".r", ".R"]
+  julia: [".jl"]
+  lua: [".lua"]
+  perl: [".pl", ".pm"]
+  shell: [".sh", ".bash", ".zsh", ".fish"]
+  powershell: [".ps1", ".psm1"]
+  sql: [".sql"]
+  markup: [".html", ".htm", ".xml", ".xhtml"]
+  css: [".css", ".scss", ".sass", ".less"]
+  config: [".json", ".yaml", ".yml", ".toml", ".ini", ".cfg", ".conf"]
+  docs: [".md", ".txt", ".rst", ".adoc"]
+
+# Language detection from project configuration files  
+language_detection:
+  python: ["pyproject.toml", "setup.py", "requirements.txt", "Pipfile", "poetry.lock"]
+  javascript: ["package.json", "package-lock.json", "yarn.lock"]
+  typescript: ["tsconfig.json", "tslint.json"]
+  java: ["pom.xml", "build.gradle", "gradle.properties"]
+  cpp: ["CMakeLists.txt", "Makefile", "configure.ac"]
+  csharp: ["*.csproj", "*.sln", "packages.config"]
+  go: ["go.mod", "go.sum"]
+  rust: ["Cargo.toml", "Cargo.lock"]
+  php: ["composer.json", "composer.lock"]
+  ruby: ["Gemfile", "Gemfile.lock", "*.gemspec"]
+  swift: ["Package.swift", "*.xcodeproj"]
+  dart: ["pubspec.yaml", "pubspec.lock"]
+  r: ["DESCRIPTION", "NAMESPACE"]
+  julia: ["Project.toml", "Manifest.toml"]
+
+# Universal directory exclusion patterns
+excluded_directories:
+  # Version control systems
+  - ".git"
+  - ".svn" 
+  - ".hg"
+  - ".bzr"
+  
+  # Python dependency and cache directories
+  - "venv"
+  - "env"
+  - ".venv"
+  - ".env"
+  - "virtualenv"
+  - "site-packages"
+  - "dist-packages"
+  - "__pycache__"
+  - ".pytest_cache"
+  - ".coverage"
+  - "htmlcov"
+  - "coverage"
+  - ".tox"
+  - ".mypy_cache"
+  
+  # Node.js and JavaScript dependencies
+  - "node_modules"
+  - "bower_components" 
+  - "jspm_packages"
+  - ".npm"
+  - ".yarn"
+  - ".next"
+  - ".nuxt"
+  - ".nyc_output"
+  - ".jest"
+  
+  # Build and distribution directories
+  - "build"
+  - "dist"
+  - "out"
+  - "bin"
+  - "obj"
+  - "target"  # Rust, Java
+  - ".gradle"
+  - ".m2"
+  - ".maven"
+  - "gradle"
+  - ".cargo"
+  
+  # IDE and editor directories
+  - ".vscode"
+  - ".idea"
+  - ".vs"
+  - ".atom"
+  - ".sublime"
+  - "*.xcworkspace"
+  - "*.xcodeproj"
+  
+  # Cache and temporary directories  
+  - "cache"
+  - ".cache"
+  - ".sass-cache"
+  - "tmp"
+  - "temp"
+  - ".tmp"
+  - ".temp"
+  - "logs"
+  - "log"
+  
+  # Vendor and third-party directories
+  - "vendor"
+  - "third_party"
+  - "3rdparty"
+  - "external"
+  - "lib" # Often contains binaries
+  
+  # Database and storage directories
+  - "qdrant_storage"
+  - "data"
+  - "datasets"
+  - "models"
+  - "weights"
+  
+  # Documentation build artifacts
+  - "_site"
+  - "_build"
+  - ".jekyll-cache"
+  - "site"
+  - "docs/_build"
+  - "doc/_build"
+  
+  # OS-specific directories
+  - ".DS_Store"
+  - "Thumbs.db"
+
+# File pattern exclusions (glob patterns)
+excluded_file_patterns:
+  # Compiled bytecode and binaries
+  - "*.pyc"
+  - "*.pyo" 
+  - "*.pyd"
+  - "*.so"
+  - "*.dylib"
+  - "*.dll"
+  - "*.exe"
+  - "*.class"
+  - "*.jar"
+  - "*.war"
+  - "*.ear"
+  - "*.o"
+  - "*.obj"
+  - "*.lib"
+  - "*.a"
+  
+  # Archive and compressed files
+  - "*.zip"
+  - "*.tar"
+  - "*.tar.gz"
+  - "*.tgz"
+  - "*.rar"
+  - "*.7z"
+  - "*.gz"
+  - "*.bz2"
+  
+  # Media and binary assets
+  - "*.png"
+  - "*.jpg"
+  - "*.jpeg"
+  - "*.gif"
+  - "*.svg"
+  - "*.ico"
+  - "*.bmp"
+  - "*.tiff"
+  - "*.webp"
+  - "*.mp3"
+  - "*.mp4"
+  - "*.avi"
+  - "*.mov"
+  - "*.wav"
+  - "*.flac"
+  - "*.ogg"
+  
+  # Document formats (often large)
+  - "*.pdf"
+  - "*.doc"
+  - "*.docx"
+  - "*.xls"
+  - "*.xlsx"
+  - "*.ppt"
+  - "*.pptx"
+  
+  # Log files
+  - "*.log"
+  - "*.out"
+  - "*.err"
+  
+  # Temporary and backup files
+  - "*.tmp"
+  - "*.temp"
+  - "*.swp"
+  - "*.swo"
+  - "*~"
+  - "#*#"
+  - ".#*"
+  - "*.bak"
+  - "*.backup"
+  
+  # Lock files (can be very large)
+  - "yarn.lock"
+  - "package-lock.json"
+  - "poetry.lock"
+  - "Pipfile.lock"
+  - "Cargo.lock"
+  - "composer.lock"
+  - "Gemfile.lock"
+  - "*.lock"
+  - "*.pid"
+  
+  # Database files
+  - "*.db"
+  - "*.sqlite"
+  - "*.sqlite3"
+
+# Size and performance limits
+max_file_size: 1048576  # 1MB per file
+max_total_size: 104857600  # 100MB total 
+max_files_per_dir: 1000  # Max files in single directory
+max_depth: 10  # Maximum traversal depth
+
+# Feature flags
+enable_size_warnings: true
+enable_file_hashing: false  # For duplicate detection (future)
+enable_content_filtering: false  # Filter by file content (future)
+
+# Performance tuning
+batch_size: 100  # Files to process in batches
+parallel_processing: false  # Enable parallel file processing (future)
+
+# Logging configuration
+log_level: "INFO"  # DEBUG, INFO, WARNING, ERROR
+log_excluded_files: false  # Log each excluded file (verbose)
+log_included_files: false  # Log each included file (verbose)
+create_audit_report: true  # Generate detailed audit reports

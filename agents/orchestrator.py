@@ -506,9 +506,14 @@ class CodebaseExpertAgent(BaseAgent):
         Initialize HTTP client instead.
         """
         if self.http_client is None:
+            # Configure connection pool for concurrent testing
             self.http_client = httpx.AsyncClient(
                 timeout=httpx.Timeout(30.0),  # 30 second timeout
-                limits=httpx.Limits(max_connections=10)
+                limits=httpx.Limits(
+                    max_connections=20,  # Increased from 10 to 20 for concurrent tests
+                    max_keepalive_connections=10,  # Keep connections alive
+                    keepalive_expiry=30.0  # 30 second keepalive
+                )
             )
             self.status = 'ready'
     
@@ -729,7 +734,9 @@ class ProjectManager:
                     
                     # Try to get MemOS instance from the global service
                     # This requires coordination with the main service
-                    async with httpx.AsyncClient() as client:
+                    # Use connection limits for temporary client
+                    limits = httpx.Limits(max_connections=5, max_keepalive_connections=3)
+                    async with httpx.AsyncClient(limits=limits) as client:
                         health_response = await client.get(f"http://{self.service_host}:{self.service_port}/health")
                         if health_response.status_code == 200:
                             print("✅ MemOS service is available")

@@ -1,0 +1,180 @@
+# .memignore for AI Coding Assistant Project
+# Exclude files not needed for automated test execution
+
+# Version control and git artifacts
+.git/
+.gitignore
+
+# Python bytecode and cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+.coverage
+htmlcov/
+.mypy_cache/
+.tox/
+
+# Virtual environments and dependencies
+venv/
+env/
+.venv/
+.env/
+site-packages/
+dist-packages/
+
+# Build outputs and distributions
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# IDE and editor files
+.vscode/
+.idea/
+.vs/
+.cursor/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# Logs and temporary files (recreated during test runs)
+*.log
+logs/
+tmp/
+temp/
+.tmp/
+.temp/
+toolbox.log
+server*.log
+service*.log
+startup*.log
+
+# Large binary and media files
+*.zip
+*.tar.gz
+*.rar
+*.7z
+*.pdf
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.mp4
+*.mp3
+*.avi
+*.mov
+*.wav
+
+# Database and storage directories (recreated during tests)
+qdrant_storage/
+memory_cubes/
+*.db
+*.sqlite
+*.sqlite3
+
+# External dependencies and submodules (not needed for test logic)
+MemOS/
+MemOS_backup/
+llama.cpp/
+ext/
+
+# Model files and weights (large files not needed for test logic)
+models/
+smollm/
+smollm-quantized/
+weights/
+*.h5
+*.pkl
+*.joblib
+*.gguf
+websailor-modelfile
+Modelfile
+
+# Test artifacts and temporary workspaces (recreated during tests)
+test_workspace/
+test_workspace_comprehensive/
+test_qdrant/
+test_qdrant_act/
+test_qdrant_simple/
+test_qdrant_storage/
+validation/
+coverage/
+.nyc_output/
+test-results/
+
+# Documentation and reports (not needed for test execution)
+docs/
+*.md
+!CLAUDE.md
+!README.md
+!pytest.ini
+
+# Result files and analysis artifacts (regenerated during tests)
+*results*.json
+*analysis*.json
+*analysis*.md
+*report*.json
+*report*.md
+*audit*.json
+*audit*.md
+*routing*.json
+*routing*.md
+recovery_audit.jsonl
+architecture_validation_results.json
+classifier_regression_results.json
+live_mcp_validation_*.json
+enhanced_tool_executor_test_results_*.json
+autonomous_recovery_test_results_*.json
+basic_recovery_test_results_*.json
+
+# Individual test files in root (should be in /tests/ directory)
+test_*.py
+!tests/
+
+# Documentation build artifacts
+_site/
+_build/
+.jekyll-cache/
+docs/_build/
+
+# Cache directories
+cache/
+.cache/
+.memos/
+
+# Codebase state tracking (internal manifest)
+.codebase_state.json
+
+# Temporary build/generated files
+temp_llama_cpp_python/
+
+# Large data directories
+data/
+datasets/
+
+# Lock files (can be very large)
+poetry.lock
+package-lock.json
+yarn.lock
+Pipfile.lock
+
+# OS specific files
+.DS_Store
+Thumbs.db
+
+# Backup files
+*.bak
+*.backup
+*.py.backup
+
+# Configuration that might contain secrets
+.env.local
+.env.production
+config/auth.yaml
+
+# Vendor/third-party directories
+vendor/
