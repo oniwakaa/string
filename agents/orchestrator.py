@@ -1198,17 +1198,21 @@ Current working context: {user_prompt[:200]}..."""
             
             print(f"🧠 Enriching {agent_role} task context for project {project_id}")
             
-            # 1. Query ParametricMemory for project preferences and guidelines
+            # 1. Query STRING.MD markdown preferences for project context and guidelines
             if self.project_memory_manager:
                 try:
-                    # Get all project preferences
-                    preferences = self.project_memory_manager.get_project_preferences(
+                    # Get STRING.MD markdown preferences (replaces JSON preferences)
+                    markdown_preferences = self.project_memory_manager.get_string_md_preferences(
                         user_id, project_id
                     )
                     
-                    if preferences:
-                        # Add structured preferences to task context
-                        task.context['project_preferences'] = preferences
+                    if markdown_preferences:
+                        # Add raw markdown content to task context
+                        task.context['project_preferences'] = {
+                            'content': markdown_preferences,
+                            'type': 'markdown',
+                            'source': 'STRING.MD'
+                        }
                         
                         # Format preferences for easy agent consumption
                         formatted_preferences = self.project_memory_manager.format_preferences_for_prompt(
@@ -1217,7 +1221,15 @@ Current working context: {user_prompt[:200]}..."""
                         
                         if formatted_preferences:
                             task.context['project_guidelines'] = formatted_preferences
-                            print(f"📋 Added {len(preferences)} preference categories to task context")
+                            print(f"📋 Added STRING.MD preferences to task context ({len(markdown_preferences)} characters)")
+                    else:
+                        # Fallback: try legacy JSON preferences if STRING.MD not available
+                        legacy_preferences = self.project_memory_manager.get_project_preferences(
+                            user_id, project_id
+                        )
+                        if legacy_preferences:
+                            task.context['project_preferences'] = legacy_preferences
+                            print(f"📋 Added legacy JSON preferences to task context ({len(legacy_preferences)} items)")
                         
                 except Exception as e:
                     print(f"⚠️ Failed to retrieve project preferences: {e}")

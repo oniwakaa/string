@@ -37,11 +37,13 @@ class ConfigLoader:
             config_path (str): Path to the YAML configuration file
         """
         self.config_path = Path(config_path)
+        self.string_md_path = Path("STRING.MD")  # Markdown preferences file
         self.config = {}
+        self.preferences_content = ""  # Raw markdown content from STRING.MD
         
     def load(self) -> Dict[str, Any]:
         """
-        Load configuration from YAML file and apply environment variable overrides.
+        Load configuration from YAML file, STRING.MD preferences, and apply environment variable overrides.
         
         Returns:
             Dict[str, Any]: Loaded and processed configuration
@@ -49,10 +51,25 @@ class ConfigLoader:
         # Load base configuration from YAML
         self.config = self._load_yaml()
         
+        # Load STRING.MD preferences (replaces JSON preferences)
+        self.preferences_content = self._load_string_md()
+        
+        # Add preferences content to config for easy access
+        self.config['preferences'] = {
+            'content': self.preferences_content,
+            'source': 'STRING.MD',
+            'type': 'markdown'
+        }
+        
         # Apply environment variable overrides
         self._apply_env_overrides()
         
         logger.info(f"Configuration loaded from {self.config_path}")
+        if self.preferences_content:
+            logger.info(f"Preferences loaded from {self.string_md_path} ({len(self.preferences_content)} characters)")
+        else:
+            logger.warning(f"No STRING.MD preferences found at {self.string_md_path}")
+        
         return self.config
     
     def _load_yaml(self) -> Dict[str, Any]:
@@ -75,6 +92,41 @@ class ConfigLoader:
             logger.error(f"Error loading config file {self.config_path}: {e}")
             logger.info("Using default configuration")
             return self._get_default_config()
+    
+    def _load_string_md(self) -> str:
+        """
+        Load STRING.MD preferences file as raw markdown content.
+        
+        Returns:
+            str: Raw markdown content from STRING.MD, empty string if not found
+        """
+        if not self.string_md_path.exists():
+            logger.info(f"STRING.MD preferences file not found at {self.string_md_path}")
+            return ""
+        
+        try:
+            with open(self.string_md_path, 'r', encoding='utf-8') as f:
+                content = f.read().strip()
+            
+            if not content:
+                logger.warning(f"STRING.MD file is empty at {self.string_md_path}")
+                return ""
+            
+            logger.info(f"Loaded STRING.MD preferences ({len(content)} characters)")
+            return content
+            
+        except Exception as e:
+            logger.error(f"Error loading STRING.MD file {self.string_md_path}: {e}")
+            return ""
+    
+    def get_preferences_content(self) -> str:
+        """
+        Get the raw markdown preferences content.
+        
+        Returns:
+            str: Raw markdown content from STRING.MD
+        """
+        return self.preferences_content
     
     def _apply_env_overrides(self) -> None:
         """

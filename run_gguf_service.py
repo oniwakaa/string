@@ -672,6 +672,7 @@ async def root():
             "project_preferences": "/projects/{project_id}/preferences - Manage project-specific preferences",
             "health": "/health - Service health check",
             "status": "/status - Detailed service status",
+            "doctor": "/doctor - Comprehensive system diagnostics and compatibility check",
             "docs": "/docs - API documentation"
         },
         "file_monitoring": {
@@ -825,6 +826,57 @@ async def manage_project_preferences(
             preferences=None,
             search_results=None
         )
+
+
+@app.get("/doctor", summary="System diagnostics and health check")
+async def system_doctor():
+    """
+    Comprehensive system diagnostics to verify all components are properly configured.
+    
+    This endpoint performs extensive checks including:
+    - System requirements and compatibility
+    - Python environment and dependencies  
+    - Project structure and configuration
+    - Model availability and integrity
+    - Backend service health
+    - Network connectivity and external services
+    - System resources and GPU acceleration
+    """
+    try:
+        # Import the SystemDoctor class
+        from doctor import SystemDoctor
+        
+        # Initialize and run diagnosis
+        doctor = SystemDoctor(verbose=False)
+        results = doctor.run_full_diagnosis()
+        
+        return results
+        
+    except Exception as e:
+        logger.error(f"System diagnosis failed: {e}")
+        return {
+            "platform": {
+                "system": "unknown",
+                "error": str(e)
+            },
+            "diagnosis_time_seconds": 0,
+            "summary": {
+                "overall_status": "critical",
+                "overall_message": f"Diagnosis failed: {str(e)}",
+                "status_counts": {"pass": 0, "fail": 1, "warning": 0, "info": 0},
+                "critical_failures": ["System Diagnosis"],
+                "warnings": [],
+                "total_checks": 1
+            },
+            "results": [{
+                "name": "System Diagnosis",
+                "status": "fail",
+                "message": f"Failed to run diagnosis: {str(e)}",
+                "details": None,
+                "fix_suggestion": "Check that all dependencies are installed and doctor.py exists"
+            }],
+            "timestamp": "unknown"
+        }
 
 
 # Error handlers

@@ -348,6 +348,74 @@ class ProjectMemoryManager:
         except Exception as e:
             logger.error(f"Failed to search project preferences: {e}")
             return []
+    
+    def get_string_md_preferences(self, user_id: str, project_id: str) -> str:
+        """
+        Get markdown preferences content from STRING.MD for the project.
+        
+        This replaces the JSON-based preferences with markdown meta-context.
+        
+        Args:
+            user_id: User identifier
+            project_id: Project identifier
+            
+        Returns:
+            str: Raw markdown content from STRING.MD, or empty string if not available
+        """
+        try:
+            # Load the global config to get STRING.MD content
+            from config_loader import load_config
+            config = load_config()
+            
+            # Get the preferences content from config
+            preferences = config.get('preferences', {})
+            content = preferences.get('content', '')
+            
+            if content:
+                logger.info(f"📋 Retrieved STRING.MD preferences for project {project_id} ({len(content)} characters)")
+                return content
+            else:
+                logger.warning(f"⚠️ No STRING.MD preferences available for project {project_id}")
+                return ""
+                
+        except Exception as e:
+            logger.error(f"Failed to get STRING.MD preferences: {e}")
+            return ""
+    
+    def format_preferences_for_prompt(self, user_id: str, project_id: str) -> str:
+        """
+        Format STRING.MD preferences as context for agent prompts.
+        
+        This method replaces the old JSON preference formatting with raw markdown content.
+        
+        Args:
+            user_id: User identifier
+            project_id: Project identifier
+            
+        Returns:
+            str: Formatted markdown preferences for prompt injection
+        """
+        try:
+            # Get the raw markdown content
+            markdown_content = self.get_string_md_preferences(user_id, project_id)
+            
+            if not markdown_content:
+                return ""
+            
+            # Format as context block for agent consumption
+            formatted_context = f"""# Project Context & Preferences
+
+{markdown_content}
+
+---
+The above preferences and context should guide your responses and code generation for this project."""
+            
+            logger.info(f"📝 Formatted STRING.MD preferences for project {project_id}")
+            return formatted_context
+            
+        except Exception as e:
+            logger.error(f"Failed to format preferences for prompt: {e}")
+            return ""
 
 
 # Keep backward compatibility
