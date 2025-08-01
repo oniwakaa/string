@@ -1,0 +1,81 @@
+{
+  "models": {
+    "SmolLM3-3B": {
+      "path": "models/SmolLM3-3B-Q4_K_M.gguf",
+      "loader": "gguf",
+      "purpose": "codebase_expert",
+      "priority": "high",
+      "config": {
+        "n_ctx": 16384,
+        "n_gpu_layers": -1,
+        "temperature": 0.7,
+        "max_tokens": 512
+      }
+    },
+    "gemma-3n-E4B-it": {
+      "path": "models/gemma-3n-E4B-it-Q5_K_S.gguf",
+      "loader": "gguf",
+      "purpose": "code_generation", 
+      "priority": "high",
+      "config": {
+        "n_ctx": 16384,
+        "n_gpu_layers": -1,
+        "temperature": 0.3,
+        "max_tokens": 1024
+      }
+    },
+    "Qwen3-1.7B-GGUF": {
+      "path": "models/Qwen3-1.7B-Q5_K_M.gguf",
+      "loader": "gguf",
+      "purpose": "code_quality",
+      "priority": "medium",
+      "config": {
+        "n_ctx": 16384,
+        "n_gpu_layers": -1,
+        "temperature": 0.1,
+        "max_tokens": 512
+      }
+    },
+    "websailor-local": {
+      "path": "models/WebSailor-3B.Q5_K_S.gguf",
+      "loader": "gguf",
+      "purpose": "web_research",
+      "priority": "medium",
+      "config": {
+        "n_ctx": 16384,
+        "n_gpu_layers": -1,
+        "temperature": 0.5,
+        "max_tokens": 1024
+      }
+    },
+    "Qwen3-Embedding-0.6B-GGUF": {
+      "path": "models/Qwen3-Embedding-0.6B-f16.gguf",
+      "loader": "gguf",
+      "purpose": "embedding",
+      "priority": "low",
+      "config": {
+        "n_ctx": 16384,
+        "n_gpu_layers": -1,
+        "embedding": true
+      }
+    }
+  },
+  "agent_mapping": {
+    "CodebaseExpertAgent": "SmolLM3-3B",
+    "CodeGeneratorAgent": "gemma-3n-E4B-it",
+    "CodeQualityAgent": "Qwen3-1.7B-GGUF",
+    "WebResearcherAgent": "websailor-local",
+    "MemOS": "Qwen3-Embedding-0.6B-GGUF"
+  },
+  "memory_limits": {
+    "max_total_memory_gb": 6.0,
+    "memory_check_interval": 30,
+    "auto_eviction": true,
+    "idle_timeout_minutes": 10
+  },
+  "performance": {
+    "lazy_loading": true,
+    "preload_critical": ["SmolLM3-3B"],
+    "concurrent_loads": false
+  }
+}

@@ -56,9 +56,10 @@ smollm-quantized/
 *.pb
 
 # Model-related files
-model*/
-models/
 checkpoints/
 weights/
 *.model
 *.weights
+qdrant_storage/
+memory_cubes/
+ext/
