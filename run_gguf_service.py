@@ -12,6 +12,7 @@ import logging
 import os
 import signal
 import sys
+import time
 from contextlib import asynccontextmanager
 from typing import Dict, Any, Optional
 
@@ -323,6 +324,39 @@ class ProjectPreferenceResponse(BaseModel):
     message: str = Field(..., description="Human-readable status message")
     preferences: Optional[Dict[str, Any]] = Field(None, description="Retrieved preferences")
     search_results: Optional[list[Dict[str, Any]]] = Field(None, description="Search results for preferences")
+
+
+class ClearWorkspaceRequest(BaseModel):
+    """Request model for clearing workspace context."""
+    workspace_id: str = Field(default="default", description="Workspace identifier to clear")
+
+
+class ClearWorkspaceResponse(BaseModel):
+    """Response model for workspace clearing operations."""
+    success: bool = Field(..., description="Whether the operation succeeded")
+    workspace_id: str = Field(..., description="Workspace identifier that was cleared")
+    message: str = Field(..., description="Human-readable status message")
+    cleared_components: list[str] = Field(..., description="List of components that were cleared")
+    timestamp: float = Field(..., description="Operation timestamp")
+    error: Optional[str] = Field(None, description="Error message if operation failed")
+
+
+class CompactWorkspaceRequest(BaseModel):
+    """Request model for compacting workspace context."""
+    workspace_id: str = Field(default="default", description="Workspace identifier to compact")
+
+
+class CompactWorkspaceResponse(BaseModel):
+    """Response model for workspace compaction operations."""
+    success: bool = Field(..., description="Whether the operation succeeded")
+    workspace_id: str = Field(..., description="Workspace identifier that was compacted")
+    message: str = Field(..., description="Human-readable status message")
+    original_length: int = Field(..., description="Original token count before compression")
+    compressed_length: int = Field(..., description="Token count after compression")
+    compression_ratio: float = Field(..., description="Compression ratio (0.0 to 1.0)")
+    summary_preview: str = Field(..., description="Preview of the generated summary")
+    timestamp: float = Field(..., description="Operation timestamp")
+    error: Optional[str] = Field(None, description="Error message if operation failed")
 
 
 # API Endpoints
@@ -669,6 +703,8 @@ async def root():
             "execute_agentic_task": "/execute_agentic_task - Execute complex tasks using multiple agents",
             "agent_status": "/agent_status - Get status of all agents", 
             "file_monitor": "/file_monitor - Manage project-aware file monitoring",
+            "clear": "/clear - Clear workspace context and memory",
+            "compact": "/compact - Compact workspace context using LLM summarization",
             "project_preferences": "/projects/{project_id}/preferences - Manage project-specific preferences",
             "health": "/health - Service health check",
             "status": "/status - Detailed service status",
@@ -680,6 +716,108 @@ async def root():
             "monitoring_active": file_monitor.is_monitoring if file_monitor else False
         }
     }
+
+
+@app.post("/clear", response_model=ClearWorkspaceResponse, summary="Clear workspace context")
+async def clear_workspace_context(request: ClearWorkspaceRequest):
+    """
+    Clear all context associated with a workspace from MemOS.
+    
+    This endpoint:
+    1. Clears all memory cubes for the specified workspace
+    2. Removes vector storage and manifest files
+    3. Resets the workspace to a clean state
+    4. Provides detailed information about cleared components
+    """
+    global service
+    
+    if not service:
+        raise HTTPException(status_code=503, detail="Service not available")
+    
+    try:
+        # Import the state manager
+        sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'src'))
+        from core.codebase_state_manager import CodebaseStateManager
+        
+        # Initialize state manager
+        current_directory = os.getcwd()
+        state_manager = CodebaseStateManager(current_directory)
+        
+        # Get MemOS instance for clearing
+        mos_instance = getattr(service, 'mos_instance', None)
+        
+        # Clear workspace context
+        result = state_manager.clear_workspace_context(
+            workspace_id=request.workspace_id,
+            mos_instance=mos_instance
+        )
+        
+        return ClearWorkspaceResponse(**result)
+        
+    except Exception as e:
+        logger.error(f"Clear workspace endpoint error: {e}")
+        return ClearWorkspaceResponse(
+            success=False,
+            workspace_id=request.workspace_id,
+            message=f"Clear operation failed: {str(e)}",
+            cleared_components=[],
+            timestamp=time.time(),
+            error=str(e)
+        )
+
+
+@app.post("/compact", response_model=CompactWorkspaceResponse, summary="Compact workspace context")
+async def compact_workspace_context(request: CompactWorkspaceRequest):
+    """
+    Compact workspace context by summarizing chat history.
+    
+    This endpoint:
+    1. Retrieves chat history from MemOS memory cubes
+    2. Generates a compressed summary using the LLM
+    3. Replaces verbose history with concise summary
+    4. Reports compression statistics and performance metrics
+    """
+    global service
+    
+    if not service:
+        raise HTTPException(status_code=503, detail="Service not available")
+    
+    try:
+        # Import the state manager
+        sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'src'))
+        from core.codebase_state_manager import CodebaseStateManager
+        
+        # Initialize state manager
+        current_directory = os.getcwd()
+        state_manager = CodebaseStateManager(current_directory)
+        
+        # Get MemOS instance and LLM service for compaction
+        mos_instance = getattr(service, 'mos_instance', None)
+        llm_service = getattr(service, 'llama_wrapper', None) or getattr(service, 'llm', None)
+        
+        # Compact workspace context
+        result = state_manager.compact_workspace_context(
+            workspace_id=request.workspace_id,
+            llm_service=llm_service,
+            mos_instance=mos_instance
+        )
+        
+        return CompactWorkspaceResponse(**result)
+        
+    except Exception as e:
+        logger.error(f"Compact workspace endpoint error: {e}")
+        import time
+        return CompactWorkspaceResponse(
+            success=False,
+            workspace_id=request.workspace_id,
+            message=f"Compact operation failed: {str(e)}",
+            original_length=0,
+            compressed_length=0,
+            compression_ratio=0.0,
+            summary_preview="",
+            timestamp=time.time(),
+            error=str(e)
+        )
 
 
 @app.post("/projects/{project_id}/preferences", response_model=ProjectPreferenceResponse, summary="Manage project preferences")

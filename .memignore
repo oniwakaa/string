@@ -84,8 +84,6 @@ ext/
 
 # Model files and weights (large files not needed for test logic)
 models/
-smollm/
-smollm-quantized/
 weights/
 *.h5
 *.pkl

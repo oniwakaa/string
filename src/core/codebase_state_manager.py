@@ -340,3 +340,322 @@ class CodebaseStateManager:
             List of file paths that need to be removed
         """
         return changes.deleted_files
+    
+    def clear_workspace_context(self, workspace_id: str = "default", mos_instance=None) -> Dict[str, Any]:
+        """
+        Clear all context associated with a workspace from MemOS.
+        
+        Args:
+            workspace_id: Workspace identifier
+            mos_instance: MemOS instance for clearing memory cubes
+            
+        Returns:
+            Dictionary with operation status and details
+        """
+        try:
+            logger.info(f"🧹 Clearing workspace context for: {workspace_id}")
+            cleared_components = []
+            
+            # Clear MemOS memory cubes if instance is provided
+            if mos_instance:
+                try:
+                    # Get all memory cubes for the user/workspace
+                    if hasattr(mos_instance, 'mem_cubes') and mos_instance.mem_cubes:
+                        cube_ids = list(mos_instance.mem_cubes.keys())
+                        for cube_id in cube_ids:
+                            try:
+                                # Clear all memories in the cube
+                                mos_instance.delete_all(mem_cube_id=cube_id, user_id=workspace_id)
+                                logger.info(f"✅ Cleared memory cube: {cube_id}")
+                                cleared_components.append(f"memory_cube_{cube_id}")
+                            except Exception as e:
+                                logger.warning(f"Failed to clear memory cube {cube_id}: {e}")
+                    
+                    # Reset the MemOS instance memory cubes
+                    if hasattr(mos_instance, 'mem_cubes'):
+                        mos_instance.mem_cubes.clear()
+                        logger.info("✅ Cleared MemOS memory cubes registry")
+                        cleared_components.append("mos_cubes_registry")
+                        
+                except Exception as e:
+                    logger.warning(f"Failed to clear MemOS memory: {e}")
+            
+            # Clear the manifest file
+            if self.manifest_path.exists():
+                self.manifest_path.unlink()
+                logger.info(f"✅ Cleared manifest file: {self.manifest_path}")
+                cleared_components.append("manifest")
+            
+            # Clear Qdrant storage
+            qdrant_storage_path = self.project_root / "qdrant_storage"
+            if qdrant_storage_path.exists():
+                import shutil
+                shutil.rmtree(qdrant_storage_path)
+                logger.info(f"✅ Cleared Qdrant storage: {qdrant_storage_path}")
+                cleared_components.append("vector_storage")
+            
+            # Reset current manifest
+            self.current_manifest = None
+            
+            return {
+                "success": True,
+                "workspace_id": workspace_id,
+                "message": "Workspace context cleared successfully",
+                "cleared_components": cleared_components,
+                "timestamp": time.time()
+            }
+            
+        except Exception as e:
+            logger.error(f"❌ Failed to clear workspace context: {e}")
+            return {
+                "success": False,
+                "workspace_id": workspace_id,
+                "error": str(e),
+                "timestamp": time.time()
+            }
+    
+    def compact_workspace_context(self, workspace_id: str = "default", 
+                                 llm_service=None, mos_instance=None) -> Dict[str, Any]:
+        """
+        Compact workspace context by summarizing chat history.
+        
+        Args:
+            workspace_id: Workspace identifier
+            llm_service: LLM service instance for generating summaries
+            mos_instance: MemOS instance for accessing memory cubes
+            
+        Returns:
+            Dictionary with operation status and details
+        """
+        try:
+            logger.info(f"📦 Compacting workspace context for: {workspace_id}")
+            
+            # Get chat history from MemOS
+            chat_history = self._get_chat_history_from_memos(workspace_id, mos_instance)
+            
+            if not chat_history:
+                return {
+                    "success": True,
+                    "workspace_id": workspace_id,
+                    "message": "No chat history to compact",
+                    "original_length": 0,
+                    "compressed_length": 0,
+                    "compression_ratio": 0.0,
+                    "summary_preview": "No content to summarize",
+                    "timestamp": time.time()
+                }
+            
+            # Calculate original token count (rough estimation)
+            original_tokens = sum(len(msg.split()) for msg in chat_history)
+            
+            # Generate compressed summary
+            if llm_service:
+                summary = self._generate_summary(chat_history, llm_service)
+            else:
+                # Fallback summary without LLM
+                summary = self._create_fallback_summary(chat_history)
+            
+            # Calculate compressed token count
+            compressed_tokens = len(summary.split())
+            compression_ratio = 1 - (compressed_tokens / original_tokens) if original_tokens > 0 else 0
+            
+            # Replace history with summary in MemOS
+            compression_success = self._replace_chat_history_in_memos(workspace_id, summary, mos_instance, chat_history)
+            
+            logger.info(f"✅ Context compressed: {original_tokens} → {compressed_tokens} tokens "
+                       f"({compression_ratio:.1%} reduction)")
+            
+            return {
+                "success": compression_success,
+                "workspace_id": workspace_id,
+                "message": "Workspace context compacted successfully" if compression_success else "Partial compression completed",
+                "original_length": original_tokens,
+                "compressed_length": compressed_tokens,
+                "compression_ratio": compression_ratio,
+                "summary_preview": summary[:200] + "..." if len(summary) > 200 else summary,
+                "timestamp": time.time()
+            }
+            
+        except Exception as e:
+            logger.error(f"❌ Failed to compact workspace context: {e}")
+            return {
+                "success": False,
+                "workspace_id": workspace_id,
+                "error": str(e),
+                "timestamp": time.time()
+            }
+    
+    def _get_chat_history_from_memos(self, workspace_id: str, mos_instance) -> List[str]:
+        """
+        Get chat history for a workspace from MemOS.
+        """
+        if not mos_instance:
+            logger.warning("No MemOS instance provided for retrieving chat history")
+            return []
+        
+        try:
+            chat_history = []
+            
+            # Iterate through all memory cubes to find chat history
+            if hasattr(mos_instance, 'mem_cubes') and mos_instance.mem_cubes:
+                for cube_id, mem_cube in mos_instance.mem_cubes.items():
+                    try:
+                        # Get all memories from this cube
+                        memories = mos_instance.get_all(mem_cube_id=cube_id, user_id=workspace_id)
+                        
+                        if memories and isinstance(memories, list):
+                            for memory_data in memories:
+                                if isinstance(memory_data, dict) and 'memories' in memory_data:
+                                    for memory in memory_data['memories']:
+                                        if hasattr(memory, 'content'):
+                                            chat_history.append(memory.content)
+                                        elif isinstance(memory, dict) and 'content' in memory:
+                                            chat_history.append(memory['content'])
+                                        elif isinstance(memory, str):
+                                            chat_history.append(memory)
+                                            
+                    except Exception as e:
+                        logger.warning(f"Failed to retrieve memories from cube {cube_id}: {e}")
+                        continue
+            
+            logger.info(f"Retrieved {len(chat_history)} messages from MemOS for workspace {workspace_id}")
+            return chat_history
+            
+        except Exception as e:
+            logger.error(f"Failed to retrieve chat history from MemOS: {e}")
+            return []
+    
+    def _generate_summary(self, chat_history: List[str], llm_service) -> str:
+        """
+        Generate a summary using the LLM service.
+        """
+        try:
+            # Combine chat history
+            full_conversation = "\n".join(chat_history)
+            
+            # Create summarization prompt
+            prompt = f"""Please provide a concise summary of the following conversation, focusing on key topics, solutions provided, and any important decisions made:
+
+{full_conversation}
+
+Summary:"""
+            
+            # Generate summary (mock implementation - replace with actual LLM call)
+            if hasattr(llm_service, 'generate') or hasattr(llm_service, '__call__'):
+                try:
+                    if hasattr(llm_service, 'generate'):
+                        response = llm_service.generate(prompt, max_tokens=150)
+                    else:
+                        response = llm_service(prompt, max_tokens=150)
+                    
+                    if isinstance(response, dict) and 'text' in response:
+                        return response['text'].strip()
+                    elif isinstance(response, str):
+                        return response.strip()
+                    else:
+                        return str(response).strip()
+                except Exception as e:
+                    logger.warning(f"LLM summarization failed: {e}, using fallback")
+                    return self._create_fallback_summary(chat_history)
+            else:
+                logger.warning("LLM service not callable, using fallback summary")
+                return self._create_fallback_summary(chat_history)
+                
+        except Exception as e:
+            logger.warning(f"Summary generation failed: {e}, using fallback")
+            return self._create_fallback_summary(chat_history)
+    
+    def _create_fallback_summary(self, chat_history: List[str]) -> str:
+        """
+        Create a simple summary without LLM.
+        """
+        if not chat_history:
+            return "Empty conversation."
+        
+        # Extract user questions and topics
+        user_messages = [msg for msg in chat_history if msg.startswith("User:")]
+        topics = []
+        
+        for msg in user_messages:
+            # Extract key terms
+            content = msg.replace("User:", "").strip()
+            if "API" in content:
+                topics.append("REST API development")
+            if "authentication" in content.lower():
+                topics.append("authentication")
+            if "database" in content.lower():
+                topics.append("database integration")
+        
+        if topics:
+            return f"Conversation covered: {', '.join(set(topics))}. Total exchanges: {len(chat_history)}"
+        else:
+            return f"General development discussion with {len(chat_history)} messages."
+    
+    def _replace_chat_history_in_memos(self, workspace_id: str, summary: str, 
+                                      mos_instance, original_history: List[str]) -> bool:
+        """
+        Replace chat history with summary in MemOS storage.
+        """
+        if not mos_instance:
+            logger.warning("No MemOS instance provided for replacing chat history")
+            return False
+        
+        try:
+            success_count = 0
+            total_cubes = 0
+            
+            # Clear existing chat history from all memory cubes
+            if hasattr(mos_instance, 'mem_cubes') and mos_instance.mem_cubes:
+                cube_ids = list(mos_instance.mem_cubes.keys())
+                total_cubes = len(cube_ids)
+                
+                for cube_id in cube_ids:
+                    try:
+                        # Clear all existing memories in the cube
+                        mos_instance.delete_all(mem_cube_id=cube_id, user_id=workspace_id)
+                        
+                        # Add the compressed summary as a new memory
+                        from datetime import datetime
+                        summary_memory = {
+                            "content": summary,
+                            "metadata": {
+                                "type": "compressed_summary",
+                                "original_message_count": len(original_history),
+                                "compressed_at": datetime.now().isoformat(),
+                                "workspace_id": workspace_id
+                            }
+                        }
+                        
+                        # Add the summary to MemOS
+                        mos_instance.add(
+                            mem_cube_id=cube_id,
+                            user_id=workspace_id,
+                            content=summary,
+                            metadata=summary_memory["metadata"]
+                        )
+                        
+                        success_count += 1
+                        logger.info(f"✅ Replaced chat history in cube {cube_id} with summary")
+                        
+                    except Exception as e:
+                        logger.warning(f"Failed to replace chat history in cube {cube_id}: {e}")
+                        continue
+            
+            # Create a backup log file for tracking
+            summary_path = self.project_root / f".workspace_{workspace_id}_summary.txt"
+            try:
+                with open(summary_path, 'w', encoding='utf-8') as f:
+                    f.write(f"Workspace: {workspace_id}\n")
+                    f.write(f"Compressed at: {datetime.now().isoformat()}\n")
+                    f.write(f"Original messages: {len(original_history)}\n")
+                    f.write(f"Cubes processed: {success_count}/{total_cubes}\n")
+                    f.write(f"Summary:\n{summary}\n")
+            except Exception as e:
+                logger.warning(f"Failed to write summary log: {e}")
+            
+            logger.info(f"📝 Replaced chat history in {success_count}/{total_cubes} cubes for workspace: {workspace_id}")
+            return success_count > 0
+            
+        except Exception as e:
+            logger.error(f"Failed to replace chat history in MemOS: {e}")
+            return False
