@@ -1,49 +1,61 @@
-# Backup directories
-MemOS_backup/
-llama.cpp_backup/
+# IDE/Editor specific files
+.idea/
+.vscode/
+.cursor/
 
-# System files
+# System and OS-generated files
 .DS_Store
-.env
+Thumbs.db
+ehthumbs.db
+Icon?
 
-# Python cache
+# Virtual Environments
+venv/
+.venv/
+
+# Python cache and artifacts
 __pycache__/
 *.pyc
 *.pyo
 *.pyd
 
-# Virtual environment
-venv/
-
-# IDE/Editor files
-.cursor/
-.vscode/
-.idea/
-
-# Memory service data
-.memos/
-
-# OS generated files
-Thumbs.db
-.DS_Store?
-ehthumbs.db
-Icon?
-
-# Temporary files
-*.tmp
-*.temp
-*.log
-
-# Build artifacts
+# Build artifacts and distribution files
+build/
+dist/
 *.o
 *.so
 *.dylib
-build/
-dist/
 
-# Model files and directories
+# Local configuration and environment variables
+.env
+
+# Log, temp, and backup files
+*.log
+*.tmp
+*.temp
+*~
+*.swp
+*.bak
+MemOS_backup/
+llama.cpp_backup/
+
+# Runtime data and memory stores
+.memos/
+qdrant_storage/
+memory_cubes/
+.codebasestate.json
+
+# Test reports and artifacts
+.pytest_cache/
+.coverage
+*.json
+*.jsonl
+
+# Large model files and directories
 smollm/
 smollm-quantized/
+checkpoints/
+weights/
 *.gguf
 *.safetensors
 *.bin
@@ -54,12 +66,23 @@ smollm-quantized/
 *.h5
 *.tflite
 *.pb
-
-# Model-related files
-checkpoints/
-weights/
 *.model
 *.weights
-qdrant_storage/
-memory_cubes/
+
+# Submodules and external directories
 ext/
+
+# --- IMPORTANT EXCLUSIONS --- #
+# Ensure critical project documentation is always tracked.
+!PERPLEXITY.md
+!HANDOFF_CLI.md
+!README.md
+!README_GGUF_SERVICE.md
+!agent_mapping_audit_results.json
+!classifier_regression_results.json
+!classifier_regression_test_suite.json
+!classifier_improvement_recommendations.json
+!improved_routing_test_results.json
+!prompt_refinement_test_results.json
+!prompt_test_results.json
+!routing_failure_analysis.json
