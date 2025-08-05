@@ -1,0 +1,27 @@
+[
+  {
+    "repo_id": "mradermacher/WebSailor-3B-GGUF",
+    "filename": "WebSailor-3B.Q4_K_M.gguf",
+    "local_path": "models/"
+  },
+  {
+    "repo_id": "mradermacher/SmolLM3-3B-GGUF",
+    "filename": "SmolLM3-3B-Q4_K_M.gguf",
+    "local_path": "models/"
+  },
+  {
+    "repo_id": "mradermacher/gemma-3n-E4B-it-GGUF",
+    "filename": "gemma-3n-E4B-it-Q5_K_S.gguf",
+    "local_path": "models/"
+  },
+  {
+    "repo_id": "mradermacher/Qwen3-1.7B-GGUF",
+    "filename": "Qwen3-1.7B-Q5_K_M.gguf",
+    "local_path": "models/"
+  },
+  {
+    "repo_id": "mradermacher/Qwen3-Embedding-0.6B-GGUF",
+    "filename": "Qwen3-Embedding-0.6B-f16.gguf",
+    "local_path": "models/"
+  }
+]

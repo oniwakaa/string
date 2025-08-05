@@ -14,6 +14,8 @@ __pycache__/
 
 # Virtual environment
 venv/
+venv-test/
+.venv-test/
 
 # IDE/Editor files
 .cursor/
@@ -22,6 +24,7 @@ venv/
 
 # Memory service data
 .memos/
+.codebase_state.json
 
 # OS generated files
 Thumbs.db
@@ -44,6 +47,7 @@ dist/
 # Model files and directories
 smollm/
 smollm-quantized/
+string-clean/
 *.gguf
 *.safetensors
 *.bin

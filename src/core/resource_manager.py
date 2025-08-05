@@ -82,8 +82,20 @@ class SharedQdrantClient:
 class SharedEmbedder:
     """Shared embedder wrapper using sentence-transformers."""
     
-    def __init__(self, model_name: str = "all-MiniLM-L6-v2"):
+    def __init__(self, model_name: str = None):
         from sentence_transformers import SentenceTransformer
+        from pathlib import Path
+        
+        # Try local model path first, fallback to HuggingFace ID
+        if model_name is None:
+            local_model_path = Path("models/embedding/all-MiniLM-L6-v2")
+            if local_model_path.exists():
+                model_name = str(local_model_path)
+                logger.info(f"Using local embedding model: {model_name}")
+            else:
+                model_name = "all-MiniLM-L6-v2"
+                logger.warning(f"Local model not found, falling back to HuggingFace: {model_name}")
+        
         self.model = SentenceTransformer(model_name)
         self.model_name = model_name
         logger.info(f"SharedEmbedder initialized with {model_name}")
@@ -129,7 +141,7 @@ class ResourceManager:
         
         return self._qdrant_clients[path]
     
-    def get_embedder(self, model_name: str = "all-MiniLM-L6-v2") -> SharedEmbedder:
+    def get_embedder(self, model_name: str = None) -> SharedEmbedder:
         """Get or create shared embedder."""
         if self._embedder is None:
             self._embedder = SharedEmbedder(model_name)

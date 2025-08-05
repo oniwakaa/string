@@ -271,7 +271,7 @@ class GGUFMemoryService:
                         'embedder': {
                             'backend': 'sentence_transformer',
                             'config': {
-                                'model_name_or_path': 'all-MiniLM-L6-v2'
+                                'model_name_or_path': './models/embedding/all-MiniLM-L6-v2'
                             }
                         },
                         'chunker': {
@@ -728,7 +728,7 @@ class GGUFMemoryService:
                                 "embedder": {
                                     "backend": "sentence_transformer",
                                     "config": {
-                                        "model_name_or_path": "all-MiniLM-L6-v2",
+                                        "model_name_or_path": "./models/embedding/all-MiniLM-L6-v2",
                                         "trust_remote_code": True
                                     }
                                 },

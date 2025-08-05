@@ -98,7 +98,7 @@ class ProjectMemoryManager:
                         }
                     },
                     "extractor_llm": {"backend": "gguf", "config": {"model_name_or_path": "placeholder"}},
-                    "embedder": {"backend": "sentence_transformer", "config": {"model_name_or_path": "all-MiniLM-L6-v2"}}
+                    "embedder": {"backend": "sentence_transformer", "config": {"model_name_or_path": "./models/embedding/all-MiniLM-L6-v2"}}
                 }
             },
             act_mem={"backend": "kv_cache", "config": {"extractor_llm": {"backend": "huggingface", "config": {"model_name_or_path": "microsoft/DialoGPT-small"}}}},  # Enable KVCache

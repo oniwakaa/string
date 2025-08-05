@@ -1,0 +1,47 @@
+Metadata-Version: 2.4
+Name: string-ai-coding-assistant
+Version: 1.0.0
+Summary: A fully local AI coding assistant with multi-agent capabilities
+Author: AI Coding Assistant Team
+License: MIT
+Project-URL: Homepage, https://github.com/your-org/string-ai-coding-assistant
+Project-URL: Documentation, https://github.com/your-org/string-ai-coding-assistant/docs
+Project-URL: Repository, https://github.com/your-org/string-ai-coding-assistant
+Project-URL: Issues, https://github.com/your-org/string-ai-coding-assistant/issues
+Classifier: Development Status :: 4 - Beta
+Classifier: Intended Audience :: Developers
+Classifier: License :: OSI Approved :: MIT License
+Classifier: Operating System :: OS Independent
+Classifier: Programming Language :: Python :: 3
+Classifier: Programming Language :: Python :: 3.11
+Classifier: Topic :: Software Development :: Code Generators
+Classifier: Topic :: Scientific/Engineering :: Artificial Intelligence
+Requires-Python: >=3.11
+Description-Content-Type: text/markdown
+Requires-Dist: fastapi>=0.110.0
+Requires-Dist: uvicorn>=0.27.0
+Requires-Dist: llama-cpp-python>=0.2.57
+Requires-Dist: transformers>=4.39.0
+Requires-Dist: scrapegraphai>=0.2.1
+Requires-Dist: playwright>=1.43.0
+Requires-Dist: qdrant-client>=1.8.0
+Requires-Dist: sqlalchemy>=2.0.0
+Requires-Dist: pydantic>=2.0.0
+Requires-Dist: numpy>=1.24.0
+Requires-Dist: torch>=2.0.0
+Requires-Dist: sentence-transformers>=2.2.0
+Requires-Dist: requests>=2.31.0
+Requires-Dist: aiofiles>=23.0.0
+Requires-Dist: python-multipart>=0.0.6
+Requires-Dist: pyyaml>=6.0
+Requires-Dist: typer[all]>=0.12.0
+Requires-Dist: rich>=13.0.0
+Requires-Dist: httpx>=0.27.0
+Provides-Extra: dev
+Requires-Dist: pytest>=7.0.0; extra == "dev"
+Requires-Dist: pytest-asyncio>=0.21.0; extra == "dev"
+Requires-Dist: black>=23.0.0; extra == "dev"
+Requires-Dist: isort>=5.12.0; extra == "dev"
+Requires-Dist: flake8>=6.0.0; extra == "dev"
+Requires-Dist: mypy>=1.0.0; extra == "dev"
+Requires-Dist: coverage>=7.0.0; extra == "dev"
