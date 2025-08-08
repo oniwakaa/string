@@ -3,6 +3,9 @@ alembic
 annotated-types
 antlr4-python3-runtime
 anyio
+# Missing dependencies identified during troubleshooting
+pathspec
+lxml_html_clean
 asgiref
 certifi
 charset-normalizer
@@ -47,7 +50,7 @@ ollama
 mpmath
 mss
 networkx
-numpy
+numpy<2.0.0
 ocrmac
 omegaconf
 onnxruntime
@@ -122,3 +125,4 @@ uvicorn
 watchdog
 wrapt
 zipp
+pipx

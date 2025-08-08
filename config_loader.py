@@ -11,6 +11,7 @@ import sys
 import yaml
 from pathlib import Path
 from typing import Dict, Any, Optional
+import re
 
 # Add MemOS to Python path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'MemOS', 'src'))
@@ -36,7 +37,17 @@ class ConfigLoader:
         Args:
             config_path (str): Path to the YAML configuration file
         """
-        self.config_path = Path(config_path)
+        # Check if we should use runtime config from STRING_HOME
+        self.string_home = self._get_string_home()
+        if config_path == "config.yaml" and self.string_home:
+            runtime_config = self.string_home / "config" / "runtime_config.yaml"
+            if runtime_config.exists():
+                self.config_path = runtime_config
+                logger.info(f"Using runtime config from STRING_HOME: {runtime_config}")
+            else:
+                self.config_path = Path(config_path)
+        else:
+            self.config_path = Path(config_path)
         self.config = {}
         
     def load(self) -> Dict[str, Any]:
@@ -48,6 +59,10 @@ class ConfigLoader:
         """
         # Load base configuration from YAML
         self.config = self._load_yaml()
+        
+        # Resolve STRING_HOME placeholders in paths
+        if self.string_home:
+            self.config = self._resolve_string_home_paths(self.config)
         
         # Apply environment variable overrides
         self._apply_env_overrides()
@@ -82,20 +97,23 @@ class ConfigLoader:
         """
         # Environment variable mappings
         env_mappings = {
-            'GGUF_MODEL_PATH': ['gguf_model', 'model_path'],
+            'STRING_HOME': ['string_home'],  # Support for STRING_HOME override
+            'GGUF_MODEL_PATH': ['model', 'model_path'],
             'GGUF_GPU_LAYERS': ['gguf_model', 'hardware', 'gpu_layers'],
             'GGUF_THREADS': ['gguf_model', 'hardware', 'threads'],
-            'GGUF_MAX_TOKENS': ['gguf_model', 'generation', 'max_tokens'],
-            'GGUF_TEMPERATURE': ['gguf_model', 'generation', 'temperature'],
-            'GGUF_TOP_P': ['gguf_model', 'generation', 'top_p'],
-            'GGUF_TOP_K': ['gguf_model', 'generation', 'top_k'],
+            'GGUF_MAX_TOKENS': ['model', 'generation', 'max_tokens'],
+            'GGUF_TEMPERATURE': ['model', 'generation', 'temperature'],
+            'GGUF_TOP_P': ['model', 'generation', 'top_p'],
+            'GGUF_TOP_K': ['model', 'generation', 'top_k'],
             'GGUF_REPETITION_PENALTY': ['gguf_model', 'generation', 'repetition_penalty'],
-            'GGUF_CONTEXT_LENGTH': ['gguf_model', 'hardware', 'context_length'],
+            'GGUF_CONTEXT_LENGTH': ['model', 'generation', 'n_ctx'],
             'MEMOS_USER_ID': ['memos', 'user_id'],
             'MEMOS_TOP_K': ['memos', 'top_k'],
             'SERVICE_HOST': ['service', 'api', 'host'],
             'SERVICE_PORT': ['service', 'api', 'port'],
             'LOG_LEVEL': ['logging', 'level'],
+            'QDRANT_STORAGE_PATH': ['storage', 'qdrant_storage'],
+            'CODEBASE_STATE_PATH': ['storage', 'codebase_state'],
         }
         
         for env_var, config_path in env_mappings.items():
@@ -239,6 +257,46 @@ class ConfigLoader:
             return current
         except (KeyError, TypeError):
             return default
+    
+    def _get_string_home(self) -> Optional[Path]:
+        """Get STRING_HOME directory path."""
+        import platform
+        
+        # Check for environment override
+        if "STRING_HOME" in os.environ:
+            return Path(os.environ["STRING_HOME"]).resolve()
+        
+        # Platform-specific defaults
+        system = platform.system().lower()
+        if system == "windows":
+            home_base = Path(os.environ.get("USERPROFILE", Path.home()))
+            return home_base / ".string"
+        else:
+            # macOS and Linux
+            return Path.home() / ".string"
+    
+    def _resolve_string_home_paths(self, config: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Recursively resolve {{STRING_HOME}} placeholders in configuration paths.
+        
+        Args:
+            config (Dict[str, Any]): Configuration dictionary
+            
+        Returns:
+            Dict[str, Any]: Configuration with resolved paths
+        """
+        if isinstance(config, dict):
+            result = {}
+            for key, value in config.items():
+                result[key] = self._resolve_string_home_paths(value)
+            return result
+        elif isinstance(config, list):
+            return [self._resolve_string_home_paths(item) for item in config]
+        elif isinstance(config, str) and "{{STRING_HOME}}" in config:
+            resolved_path = config.replace("{{STRING_HOME}}", str(self.string_home))
+            return resolved_path
+        else:
+            return config
 
 
 def load_config(config_path: str = "config.yaml") -> Dict[str, Any]:

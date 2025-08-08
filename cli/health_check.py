@@ -10,6 +10,7 @@ system binaries required for the multi-agent AI coding assistant.
 import glob
 import importlib
 import json
+import platform
 import sys
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
@@ -36,15 +37,21 @@ class HealthChecker:
     def __init__(self, project_root: Optional[Path] = None):
         """Initialize the health checker with project root detection."""
         if project_root is None:
-            # Auto-detect project root by finding CLAUDE.md
-            current = Path(__file__).parent
-            while current != current.parent:
-                if (current / "CLAUDE.md").exists():
-                    project_root = current
-                    break
-                current = current.parent
+            # Auto-detect project root by finding pyproject.toml or models directory
+            # First try current working directory 
+            if (Path.cwd() / "pyproject.toml").exists() or (Path.cwd() / "models").exists():
+                project_root = Path.cwd()
             else:
-                project_root = Path(__file__).parent.parent
+                # Try searching from CLI module location
+                current = Path(__file__).parent
+                while current != current.parent:
+                    if (current / "pyproject.toml").exists() or (current / "models").exists():
+                        project_root = current
+                        break
+                    current = current.parent
+                else:
+                    # Fallback to current directory
+                    project_root = Path.cwd()
         
         self.project_root = Path(project_root).resolve()
         self.console = Console()
@@ -114,6 +121,53 @@ class HealthChecker:
                 missing_packages.append(f"{package_name} ({description})")
         
         return len(missing_packages) == 0, missing_packages
+    
+    def check_llama_cpp_backend(self) -> Tuple[bool, List[str]]:
+        """
+        Verify llama-cpp-python backend configuration and Metal availability on macOS.
+        
+        Returns:
+            Tuple[bool, List[str]]: (success, list of backend issues)
+        """
+        backend_issues = []
+        
+        try:
+            import llama_cpp
+            
+            # On macOS Apple Silicon, check if Metal is available
+            system = platform.system().lower()
+            arch = platform.machine().lower()
+            is_apple_silicon = system == "darwin" and arch in ["arm64", "aarch64"]
+            
+            if is_apple_silicon:
+                try:
+                    # Try to create a minimal Metal-enabled model instance to verify Metal support
+                    # This is a basic test - we don't need to load a full model
+                    test_params = {
+                        "model_path": "/dev/null",  # Non-existent path for testing
+                        "n_ctx": 512,
+                        "n_gpu_layers": 1,  # Test Metal availability
+                        "verbose": False
+                    }
+                    
+                    # The constructor will fail for missing model but Metal init should succeed
+                    try:
+                        llama_cpp.Llama(**test_params)
+                    except Exception as e:
+                        error_msg = str(e).lower()
+                        if "metal" not in error_msg and "gpu" not in error_msg:
+                            # Metal is available but model path is invalid (expected)
+                            pass  
+                        else:
+                            backend_issues.append("Metal backend not available (CPU-only build detected)")
+                            
+                except Exception:
+                    backend_issues.append("Unable to verify Metal backend availability")
+                    
+        except ImportError:
+            backend_issues.append("llama-cpp-python not installed or not importable")
+        
+        return len(backend_issues) == 0, backend_issues
 
     def check_custom_components(self) -> Tuple[bool, List[str]]:
         """
@@ -186,27 +240,29 @@ class HealthChecker:
 
     def check_backend_configuration(self) -> Tuple[bool, List[str]]:
         """
-        Verify that backend configuration files are present and valid.
+        Verify that runtime configuration and models are present.
         
         Returns:
-            Tuple[bool, List[str]]: (success, list of missing config files)
+            Tuple[bool, List[str]]: (success, list of missing runtime components)
         """
         missing_configs = []
         
-        critical_configs = [
-            "config/models.yaml",
-            "config/agent_intent_registry.yaml",
-            "CLAUDE.md",
-        ]
+        # Check for local embedding model path as per HANDOFF_CLI.md
+        embedding_path = self.project_root / "models" / "embedding" / "all-MiniLM-L6-v2"
+        if not embedding_path.exists():
+            missing_configs.append("Local embedding model (models/embedding/all-MiniLM-L6-v2)")
         
-        for config_path in critical_configs:
-            full_path = self.project_root / config_path
-            if not full_path.exists():
-                missing_configs.append(f"{config_path} (configuration file)")
+        # Check for models configuration file
+        models_config = self.project_root / "models" / "config.json"
+        if not models_config.exists():
+            missing_configs.append("Models configuration (models/config.json)")
         
-        # Check for pyproject.toml
-        if not (self.project_root / "pyproject.toml").exists():
-            missing_configs.append("pyproject.toml (project configuration)")
+        # Check for at least one agent configuration (optional but recommended)
+        config_dir = self.project_root / "config"
+        if config_dir.exists():
+            agent_configs = list(config_dir.glob("*agent*.yaml")) + list(config_dir.glob("*agent*.yml"))
+            if not agent_configs:
+                missing_configs.append("Agent configuration files (config/*agent*.yaml)")
         
         return len(missing_configs) == 0, missing_configs
 
@@ -231,9 +287,10 @@ class HealthChecker:
         # Execute all health checks
         checks = [
             ("Core Python Packages", self.check_core_packages),
+            ("LLaMA.cpp Backend", self.check_llama_cpp_backend),
             ("Custom Components", self.check_custom_components),  
             ("Machine Learning Models", self.check_ml_models),
-            ("Backend Configuration", self.check_backend_configuration),
+            ("Runtime Configuration", self.check_backend_configuration),
         ]
         
         if verbose:
@@ -301,23 +358,27 @@ class HealthChecker:
             
             # Generate category-specific suggestions
             if category == "Core Python Packages":
-                suggestion = "pip install -e ."
-                suggestions.append("Reinstall Python dependencies with: pip install -e .")
+                suggestion = "Install via pipx and download models"
+                suggestions.append("Install globally: python3 setup_cli.py")
+                
+            elif category == "LLaMA.cpp Backend":
+                suggestion = "Reinstall with correct backend"
+                suggestions.append("Reinstall with backend: python3 setup_cli.py")
                 
             elif category == "Custom Components":
-                suggestion = "Check repository integrity"
-                suggestions.append("Verify all custom components are properly cloned/installed.")
+                suggestion = "Install via pipx and download models"
+                suggestions.append("Install globally: python3 setup_cli.py")
                 
             elif category == "Machine Learning Models":
-                suggestion = "Download missing models"
-                suggestions.append("Download models with: python scripts/install_dependencies.py")
+                suggestion = "Run setup_cli.py --with-models"
+                suggestions.append("Download models: python3 setup_cli.py --with-models")
                 
-            elif category == "Backend Configuration":
-                suggestion = "Check repository state"
-                suggestions.append("Ensure all configuration files are present in the repository.")
+            elif category == "Runtime Configuration":
+                suggestion = "Run setup_cli.py --with-models"
+                suggestions.append("Setup runtime components: python3 setup_cli.py --with-models")
                 
             else:
-                suggestion = "Manual intervention required"
+                suggestion = "Run python3 setup_cli.py"
             
             error_table.add_row(category, error_list, suggestion)
         

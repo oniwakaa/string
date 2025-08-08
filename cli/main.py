@@ -9,6 +9,7 @@ and MemOS RAG integration.
 
 import asyncio
 import json
+import os
 import sys
 from pathlib import Path
 from typing import Optional, Dict, Any
@@ -24,7 +25,11 @@ from rich.live import Live
 from rich.spinner import Spinner
 
 # Import health check functionality
-from cli.health_check import run_preflight_checks, DependencyError
+from cli.runtime_health import run_runtime_checks, DependencyError
+# Import runtime home management
+from cli.runtime_home import ensure_string_home, get_string_home, initialize_default_configs
+# Import backend management
+from cli.backend_manager import get_backend_manager
 
 
 app = typer.Typer(
@@ -131,16 +136,86 @@ class BackendClient:
 
 @app.command()
 def validate():
-    """Run comprehensive dependency validation checks."""
+    """Run comprehensive runtime dependency validation checks."""
     try:
-        run_preflight_checks(verbose=True)
-        console.print("\n🎉 [green]All validation checks completed successfully![/green]")
-        console.print("Your String CLI environment is properly configured.")
+        run_runtime_checks(verbose=True)
+        
+        console.print("\n🎉 [green]All runtime validation checks passed![/green]")
+        console.print("✅ [green]String CLI is ready for use[/green]")
+        
     except DependencyError as e:
-        console.print(f"\n❌ [red]Validation failed:[/red] {e.message}")
+        console.print(f"\n❌ [red]Runtime validation failed:[/red] {e.message}")
+        if e.suggestions:
+            console.print("\n💡 [cyan]Suggested fixes:[/cyan]")
+            for suggestion in e.suggestions:
+                console.print(f"   • {suggestion}")
         raise typer.Exit(code=1)
     except Exception as e:
-        console.print(f"\n⚠️  [yellow]Validation error:[/yellow] {e}")
+        console.print(f"\n⚠️  [yellow]Runtime validation error:[/yellow] {e}")
+        raise typer.Exit(code=1)
+
+
+@app.command()
+def status():
+    """Show backend service and CLI status."""
+    backend_manager = get_backend_manager()
+    status_info = backend_manager.get_backend_status()
+    
+    console.print("🔍 [blue]String CLI Status[/blue]")
+    console.print(f"Runtime home: {get_string_home()}")
+    
+    # Backend status
+    if status_info['running']:
+        status_color = "green" if status_info['healthy'] else "yellow"
+        health_text = "Healthy" if status_info['healthy'] else "Unhealthy"
+        console.print(f"Backend: [{status_color}]{health_text}[/{status_color}] (PID: {status_info['pid']})")
+    else:
+        console.print("Backend: [red]Not Running[/red]")
+    
+    console.print(f"Backend URL: {status_info['url']}")
+    
+    if status_info['log_file']:
+        console.print(f"Log file: {status_info['log_file']}")
+
+
+@app.command() 
+def start_backend():
+    """Manually start the backend service."""
+    backend_manager = get_backend_manager()
+    
+    # Check if already running
+    is_running, pid = backend_manager.is_backend_running()
+    if is_running:
+        console.print(f"✅ [green]Backend already running[/green] (PID: {pid})")
+        return
+    
+    console.print("🚀 Starting backend service...")
+    success, pid = backend_manager.start_backend()
+    
+    if success:
+        console.print(f"✅ [green]Backend started successfully[/green] (PID: {pid})")
+    else:
+        console.print("❌ [red]Failed to start backend service[/red]")
+        raise typer.Exit(code=1)
+
+
+@app.command()
+def stop_backend():
+    """Stop the backend service."""
+    backend_manager = get_backend_manager()
+    
+    is_running, pid = backend_manager.is_backend_running()
+    if not is_running:
+        console.print("✅ [green]Backend is not running[/green]")
+        return
+    
+    console.print(f"🛑 Stopping backend service (PID: {pid})...")
+    success = backend_manager.stop_backend(pid)
+    
+    if success:
+        console.print("✅ [green]Backend stopped successfully[/green]")
+    else:
+        console.print("❌ [red]Failed to stop backend service[/red]")
         raise typer.Exit(code=1)
 
 
@@ -455,6 +530,67 @@ def status():
     asyncio.run(_status())
 
 
+@app.command()
+def start_backend(
+    port: int = typer.Option(8000, "--port", "-p", help="Port for backend service"),
+    host: str = typer.Option("127.0.0.1", "--host", help="Host for backend service"),
+    detach: bool = typer.Option(False, "--detach", "-d", help="Run in background")
+):
+    """Start the backend GGUF memory service."""
+    import subprocess
+    import sys
+    from pathlib import Path
+    
+    # Find the project root to run the service from
+    current_dir = Path.cwd()
+    service_script = None
+    
+    # Look for run_gguf_service.py in current directory and parent directories
+    search_paths = [current_dir] + list(current_dir.parents)
+    for path in search_paths:
+        potential_service = path / "run_gguf_service.py"
+        if potential_service.exists():
+            service_script = potential_service
+            break
+    
+    if not service_script:
+        console.print("❌ [red]Backend service script not found[/red]")
+        console.print("💡 Make sure you're running from the project directory containing run_gguf_service.py")
+        raise typer.Exit(1)
+    
+    console.print(f"🚀 [blue]Starting backend service...[/blue]")
+    console.print(f"📁 Service script: {service_script}")
+    console.print(f"🌐 Server: {host}:{port}")
+    
+    # Get the pipx python environment
+    pipx_python = Path.home() / ".local" / "pipx" / "venvs" / "string-ai-coding-assistant" / "bin" / "python"
+    if not pipx_python.exists():
+        console.print("❌ [red]pipx environment not found[/red]")
+        console.print("💡 Run: python3 setup_cli.py")
+        raise typer.Exit(1)
+    
+    # Set environment variables
+    env = os.environ.copy()
+    env["HOST"] = host
+    env["PORT"] = str(port)
+    
+    if detach:
+        # Run in background
+        console.print("🔄 [yellow]Starting in background...[/yellow]")
+        process = subprocess.Popen([
+            str(pipx_python), str(service_script)
+        ], env=env, cwd=service_script.parent, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        console.print(f"✅ [green]Backend service started with PID {process.pid}[/green]")
+        console.print(f"🔗 [cyan]API available at: http://{host}:{port}[/cyan]")
+    else:
+        # Run in foreground
+        console.print("🔄 [yellow]Starting in foreground (Ctrl+C to stop)...[/yellow]")
+        try:
+            subprocess.run([str(pipx_python), str(service_script)], env=env, cwd=service_script.parent)
+        except KeyboardInterrupt:
+            console.print("\n🛑 [yellow]Backend service stopped[/yellow]")
+
+
 @app.callback(invoke_without_command=True)
 def main(
     ctx: typer.Context,
@@ -491,25 +627,58 @@ def main(
         string-cli /clear
         string-cli /compact
     """
+    # Initialize STRING_HOME runtime directory
+    try:
+        string_home = ensure_string_home()
+        initialize_default_configs()
+        if verbose_checks:
+            console.print(f"🏠 [blue]Runtime home:[/blue] {string_home}")
+    except Exception as e:
+        if not skip_checks:
+            console.print(f"❌ [red]Failed to initialize runtime home:[/red] {e}")
+            raise typer.Exit(code=1)
+    
     # Handle version request before any other processing
     if version:
+        string_home = get_string_home()
         console.print("string-cli v1.0.0 - Local AI Coding Assistant")
         console.print("Backend: FastAPI + Multi-Agent Architecture")
         console.print("Models: SmolLM3-3B, Gemma-3n-E4B-it, Qwen3-1.7B")
+        console.print(f"Runtime home: {string_home}")
         raise typer.Exit()
     
-    # Run pre-flight dependency checks before any command execution
+    # Run runtime dependency checks before any command execution
     if not skip_checks:
         try:
-            run_preflight_checks(verbose=verbose_checks)
+            run_runtime_checks(verbose=verbose_checks or True)  # Always show details for debugging
         except DependencyError as e:
-            console.print(f"\n❌ [red]Pre-flight checks failed:[/red]")
+            console.print(f"\n❌ [red]Runtime checks failed:[/red]")
             console.print(f"{e.message}")
+            if e.suggestions:
+                console.print("\n💡 [cyan]Suggested fixes:[/cyan]")
+                for suggestion in e.suggestions:
+                    console.print(f"   • {suggestion}")
             console.print("\n💡 [yellow]Use --skip-checks to bypass validation (not recommended)[/yellow]")
             raise typer.Exit(code=1)
         except Exception as e:
-            console.print(f"\n⚠️  [yellow]Warning:[/yellow] Pre-flight check encountered an error: {e}")
+            console.print(f"\n⚠️  [yellow]Warning:[/yellow] Runtime check encountered an error: {e}")
             console.print("Proceeding anyway... some features may not work correctly.")
+    
+    # Ensure backend is running before any operations (except version/help/backend commands)
+    backend_commands = ['start-backend', 'stop-backend', 'status', 'validate']
+    skip_backend_start = (ctx.invoked_subcommand in backend_commands or 
+                         any(cmd in str(ctx.command.name) for cmd in backend_commands))
+    
+    if not skip_checks and user_input is not None and not skip_backend_start:
+        backend_manager = get_backend_manager()
+        try:
+            if not asyncio.run(backend_manager.ensure_backend_running()):
+                console.print("❌ [red]Failed to start backend service[/red]")
+                console.print("💡 [yellow]Try running with --skip-checks or check the logs[/yellow]")
+                raise typer.Exit(code=1)
+        except Exception as e:
+            console.print(f"⚠️  [yellow]Backend auto-start error:[/yellow] {e}")
+            console.print("Proceeding anyway... backend operations may fail.")
     
     # Auto-load current directory context if backend is available
     if not user_input and ctx.invoked_subcommand is None:
