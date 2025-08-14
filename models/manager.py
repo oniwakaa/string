@@ -10,7 +10,7 @@ import os
 import time
 import threading
 import psutil
-from typing import Dict, Any, Optional, Union
+from typing import Dict, Any, Optional, Union, Tuple
 from pathlib import Path
 import logging
 
@@ -22,14 +22,64 @@ except ImportError:
 
 logger = logging.getLogger(__name__)
 
+def _get_string_home() -> Path:
+    """Resolve STRING_HOME path cross-platform."""
+    # Env override
+    if "STRING_HOME" in os.environ:
+        return Path(os.environ["STRING_HOME"]).expanduser().resolve()
+    # Windows vs *nix defaults
+    if os.name == "nt":
+        base = Path(os.environ.get("USERPROFILE", str(Path.home())))
+        return (base / ".string").resolve()
+    return (Path.home() / ".string").resolve()
+
+
+def _manifest_to_internal_config(manifest: Dict[str, Any], string_home: Path) -> Dict[str, Any]:
+    """Convert STRING_HOME/config/models.json manifest to ModelManager internal config structure."""
+    internal: Dict[str, Any] = {
+        "models": {},
+        "agent_mapping": {},
+        "memory_limits": {},
+        "performance": {},
+    }
+
+    models_dir = string_home / "models"
+    for item in manifest.get("models", []):
+        name = item.get("name")
+        filename = item.get("filename")
+        local_dir = item.get("local_dir")
+        if not all([name, filename, local_dir]):
+            continue
+        model_path = (models_dir / local_dir / filename).as_posix()
+        entry = {
+            "loader": "gguf",
+            "path": model_path,
+            "config": {
+                "n_ctx": 16384,
+                "n_gpu_layers": -1,
+            },
+            "priority": "high" if "SmolLM3-3B" in name else "medium",
+            "purpose": "general",
+        }
+        # Full name key
+        internal["models"][name] = entry
+        # Base alias (strip trailing quantization suffix after first dash)
+        base_alias = name.split("-")[0]
+        if base_alias and base_alias not in internal["models"]:
+            internal["models"][base_alias] = entry
+
+    return internal
+
+
 class ModelManager:
     """
     Centralized model manager with automatic lifecycle management, 
     memory monitoring, and lazy loading capabilities.
     """
     
-    def __init__(self, config_path: str = "models/config.json"):
-        self.config_path = config_path
+    def __init__(self, config_path: Optional[str] = None):
+        self.string_home: Path = _get_string_home()
+        self.config_path = config_path  # May be None -> use manifest
         self.config = self._load_config()
         self.loaded_models: Dict[str, Any] = {}
         self.model_metadata: Dict[str, Dict] = {}
@@ -45,17 +95,37 @@ class ModelManager:
             self._preload_critical_models()
     
     def _load_config(self) -> Dict[str, Any]:
-        """Load model configuration from JSON file."""
+        """Load model configuration from STRING_HOME manifest or explicit path."""
+        # Prefer explicit path when given
+        if self.config_path:
+            try:
+                with open(self.config_path, 'r') as f:
+                    config = json.load(f)
+                logger.info(f"Loaded model configuration from {self.config_path}")
+                return config
+            except FileNotFoundError:
+                logger.error(f"Configuration file not found: {self.config_path}")
+                # Fall through to STRING_HOME manifest
+            except json.JSONDecodeError as e:
+                logger.error(f"Invalid JSON in configuration file: {e}")
+                # Fall through to STRING_HOME manifest
+
+        # Load STRING_HOME manifest
+        manifest_path = self.string_home / "config" / "models.json"
         try:
-            with open(self.config_path, 'r') as f:
-                config = json.load(f)
-            logger.info(f"Loaded model configuration from {self.config_path}")
-            return config
+            with open(manifest_path, 'r') as f:
+                manifest = json.load(f)
+            internal = _manifest_to_internal_config(manifest, self.string_home)
+            logger.info(f"Loaded model configuration from {manifest_path}")
+            return internal
         except FileNotFoundError:
-            logger.error(f"Configuration file not found: {self.config_path}")
+            logger.error(
+                f"Model manifest not found: {manifest_path}. Ensure models are installed under ${self.string_home}/models "
+                "and manifest exists at ${STRING_HOME}/config/models.json (run: python setup_cli.py --with-models)."
+            )
             return {"models": {}, "agent_mapping": {}, "memory_limits": {}}
         except json.JSONDecodeError as e:
-            logger.error(f"Invalid JSON in configuration file: {e}")
+            logger.error(f"Invalid JSON in model manifest {manifest_path}: {e}")
             return {"models": {}, "agent_mapping": {}, "memory_limits": {}}
     
     def _preload_critical_models(self):
@@ -113,6 +183,38 @@ class ModelManager:
                 logger.error(f"Error in memory monitor: {e}")
                 time.sleep(interval)
     
+    def _normalize_model_key(self, requested: str) -> str:
+        """Normalize incoming model names to manifest-valid keys.
+        Accepted canonical keys include:
+          - SmolLM3-3B-Q4_K_M
+          - Gemma-3n-E4B-it-Q5_K_S
+          - Qwen3-1.7B-Q5_K_M
+        Fallbacks: map base aliases like 'SmolLM3-3B' -> 'SmolLM3-3B-Q4_K_M' if present.
+        """
+        models = self.config.get("models", {})
+        if requested in models:
+            return requested
+        alias_map = {
+            "SmolLM3-3B": "SmolLM3-3B-Q4_K_M",
+            "Gemma-3n-E4B-it": "gemma-3n-E4B-it-Q5_K_S",
+            "gemma-3n-E4B-it": "gemma-3n-E4B-it-Q5_K_S",  # Case variant
+            "Qwen3-1.7B": "Qwen3-1.7B-Q5_K_M",
+        }
+        if requested in alias_map and alias_map[requested] in models:
+            return alias_map[requested]
+        # Try base alias prefix
+        base_alias = requested.split("-")[0]
+        candidates = [k for k in models.keys() if k.startswith(base_alias)]
+        if candidates:
+            return candidates[0]
+        # No mapping
+        available = ", ".join(models.keys()) or "<none>"
+        raise ValueError(
+            f"Model '{requested}' not found in configuration. Available: {available}. "
+            f"Ensure {(_get_string_home() / 'config' / 'models.json').as_posix()} contains a valid entry, "
+            "or run: python setup_cli.py --with-models"
+        )
+
     def get_model(self, model_name: str) -> Any:
         """
         Get a model instance, loading it if necessary.
@@ -127,8 +229,8 @@ class ModelManager:
             ValueError: If model not found in configuration
             RuntimeError: If model fails to load
         """
-        if model_name not in self.config["models"]:
-            raise ValueError(f"Model '{model_name}' not found in configuration")
+        if model_name not in self.config.get("models", {}):
+            model_name = self._normalize_model_key(model_name)
         
         with self._lock:
             # Return cached model if already loaded
@@ -172,7 +274,10 @@ class ModelManager:
         
         # Ensure model file exists
         if not os.path.exists(model_path):
-            raise RuntimeError(f"Model file not found: {model_path}")
+            raise RuntimeError(
+                f"Model file not found: {model_path}. Ensure models are installed under "
+                f"{(self.string_home / 'models').as_posix()} (run: python setup_cli.py --with-models)."
+            )
         
         try:
             if loader == "gguf":
@@ -271,6 +376,16 @@ class ModelManager:
                 }
                 for name in self.loaded_models.keys()
             }
+
+    def get_memory_stats(self) -> Dict[str, Any]:
+        """Compatibility shim used by health/status callers.
+        Returns lightweight statistics about loaded models.
+        """
+        with self._lock:
+            return {
+                "currently_loaded": len(self.loaded_models),
+                "loaded_model_names": list(self.loaded_models.keys()),
+            }
     
     def get_memory_usage(self) -> Dict[str, float]:
         """Get current memory usage statistics."""
@@ -294,8 +409,8 @@ class ModelManager:
         logger.info("ModelManager shutdown complete")
 
 
-def initialize_model_manager(config_path: str = "models/config.json") -> ModelManager:
-    """Initialize and return a ModelManager instance."""
+def initialize_model_manager(config_path: Optional[str] = None) -> ModelManager:
+    """Initialize and return a ModelManager instance (STRING_HOME-aware by default)."""
     return ModelManager(config_path=config_path)
 
 

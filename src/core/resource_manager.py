@@ -10,21 +10,18 @@ resources instead of allowing each component to create its own models and databa
 
 import os
 import sys
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, TYPE_CHECKING
 import logging
 
-# Add MemOS to path
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', 'MemOS', 'src'))
+# Import MemOS components via packaged namespace
+if TYPE_CHECKING:
+    from string_ai_coding_assistant.memos.configs.mem_cube import GeneralMemCubeConfig
+    from string_ai_coding_assistant.memos.mem_cube.general import GeneralMemCube
+    from string_ai_coding_assistant.memos.memories.textual.general import GeneralTextMemory
+    from string_ai_coding_assistant.memos.memories.activation.kv import KVCacheMemory
+    from string_ai_coding_assistant.memos.configs.memory import GeneralTextMemoryConfig
 
-# Import MemOS components
-from memos.configs.mem_cube import GeneralMemCubeConfig
-from memos.mem_cube.general import GeneralMemCube
-from memos.memories.textual.general import GeneralTextMemory
-from memos.memories.activation.kv import KVCacheMemory
-from memos.configs.memory import GeneralTextMemoryConfig
-
-# Import our shared resources
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+# Import our shared resources from installed package
 from models.manager import model_manager
 
 logger = logging.getLogger(__name__)
@@ -102,7 +99,7 @@ class ResourceManager:
     """
     
     def __init__(self):
-        self._mem_cubes: Dict[str, GeneralMemCube] = {}
+        self._mem_cubes: Dict[str, "GeneralMemCube"] = {}
         self._qdrant_clients: Dict[str, Any] = {}  # Path -> QdrantClient singleton dictionary
         self._embedder: Optional[SharedEmbedder] = None
         logger.info("ResourceManager initialized with singleton resource management")
@@ -136,13 +133,22 @@ class ResourceManager:
             logger.info("Created shared embedder")
         return self._embedder
     
-    def create_shared_text_memory(self, config: GeneralTextMemoryConfig, collection_name: str = None) -> GeneralTextMemory:
+    def create_shared_text_memory(self, config: "GeneralTextMemoryConfig", collection_name: str = None) -> "GeneralTextMemory":
         """
         Create GeneralTextMemory with shared resources instead of internal factories.
         
         This is the critical fix - we bypass MemOS's internal LLMFactory, VecDBFactory,
         and EmbedderFactory to prevent multiple model loading.
         """
+        # Import MemOS class at runtime to avoid circular imports; enforce requirement
+        try:
+            from string_ai_coding_assistant.memos.memories.textual.general import GeneralTextMemory
+        except Exception as e:
+            raise RuntimeError(
+                "MemOS import failed while creating GeneralTextMemory. Ensure MemOS is installed at 'string_ai_coding_assistant.memos'. "
+                f"Original error: {e}"
+            )
+
         # Create an "empty" GeneralTextMemory instance
         text_memory = object.__new__(GeneralTextMemory)
         
@@ -156,14 +162,19 @@ class ResourceManager:
             collection_name = 'default_collection'
         
         # Inject shared resources instead of letting it create its own
-        text_memory.extractor_llm = LLMModelWrapper(model_manager.get_model("SmolLM3-3B"))
+        # Prefer configured key; fallback to available alias
+        try:
+            extractor_model = model_manager.get_model("SmolLM3-3B-Q4_K_M")
+        except Exception:
+            extractor_model = model_manager.get_model("SmolLM3")
+        text_memory.extractor_llm = LLMModelWrapper(extractor_model)
         text_memory.vector_db = QdrantVecDBWrapper(self.get_qdrant_client(), collection_name)
         text_memory.embedder = EmbedderWrapper(self.get_embedder())
         
         logger.info(f"Created GeneralTextMemory with shared resources for collection '{collection_name}' (bypassed factories)")
         return text_memory
     
-    def create_shared_kv_memory(self, config) -> Optional[KVCacheMemory]:
+    def create_shared_kv_memory(self, config) -> Optional["KVCacheMemory"]:
         """
         Create KVCacheMemory with shared resources.
         For now, we'll return None to disable activation memory for stability.
@@ -171,7 +182,7 @@ class ResourceManager:
         logger.info("KVCacheMemory disabled for stability (activation memory = None)")
         return None
     
-    def create_text_memory_with_singleton(self, qdrant_client, collection_name: str) -> GeneralTextMemory:
+    def create_text_memory_with_singleton(self, qdrant_client, collection_name: str) -> "GeneralTextMemory":
         """
         Create GeneralTextMemory with singleton QdrantClient - BYPASSES ALL FACTORIES.
         
@@ -180,6 +191,15 @@ class ResourceManager:
         """
         logger.info(f"🔧 [SINGLETON] Creating textual memory with singleton client for: {collection_name}")
         
+        # Import MemOS class at runtime
+        try:
+            from string_ai_coding_assistant.memos.memories.textual.general import GeneralTextMemory
+        except Exception as e:
+            raise RuntimeError(
+                "MemOS import failed while creating GeneralTextMemory (singleton). Ensure MemOS is installed. "
+                f"Original error: {e}"
+            )
+
         # Create empty GeneralTextMemory without triggering constructor
         text_memory = object.__new__(GeneralTextMemory)
         
@@ -187,7 +207,11 @@ class ResourceManager:
         text_memory.config = None  # We're bypassing config-based initialization
         
         # Inject singleton resources directly
-        text_memory.extractor_llm = LLMModelWrapper(model_manager.get_model("SmolLM3-3B"))
+        try:
+            extractor_model = model_manager.get_model("SmolLM3-3B-Q4_K_M")
+        except Exception:
+            extractor_model = model_manager.get_model("SmolLM3")
+        text_memory.extractor_llm = LLMModelWrapper(extractor_model)
         text_memory.vector_db = DirectQdrantWrapper(qdrant_client, collection_name)
         text_memory.embedder = EmbedderWrapper(self.get_embedder())
         
@@ -203,11 +227,6 @@ class ResourceManager:
         """
         try:
             # Import here to avoid circular imports
-            import sys
-            import os
-            # Add both the src directory and project root to path
-            sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
-            sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..'))
             from src.memos.memory_systems.generic_kv_memory import GenericKVMemory
             
             # Create the GenericKVMemory instance
@@ -219,7 +238,7 @@ class ResourceManager:
             logger.error(f"❌ Failed to create GenericKVMemory: {e}")
             return None
     
-    def get_mem_cube(self, cube_id: str, config: GeneralMemCubeConfig) -> GeneralMemCube:
+    def get_mem_cube(self, cube_id: str, config: "GeneralMemCubeConfig") -> "GeneralMemCube":
         """
         Get or create MemCube with singleton resources - PREVENTS LOCK FILES.
         
@@ -243,6 +262,15 @@ class ResourceManager:
         # Get the singleton QdrantClient - THIS PREVENTS LOCK CONFLICTS
         qdrant_singleton = self.get_qdrant_client(storage_path)
         
+        # Import MemOS classes at runtime
+        try:
+            from string_ai_coding_assistant.memos.mem_cube.general import GeneralMemCube
+        except Exception as e:
+            raise RuntimeError(
+                "MemOS import failed while creating GeneralMemCube. Ensure MemOS is installed at 'string_ai_coding_assistant.memos'. "
+                f"Original error: {e}"
+            )
+
         # Create an empty MemCube without triggering internal factories
         mem_cube = object.__new__(GeneralMemCube)
         mem_cube.config = config
@@ -270,11 +298,14 @@ class ResourceManager:
         # Phase 2: Activation Memory - Enable KVCacheMemory with shared LLM
         if config.act_mem.backend != "uninitialized":
             try:
-                # Get lightweight embedding model for KV cache extraction
-                kv_cache_llm = model_manager.get_model("Qwen3-Embedding-0.6B-GGUF")
+                # Get lightweight embedding model for KV cache extraction (fallbacks)
+                try:
+                    kv_cache_llm = model_manager.get_model("Qwen3-Embedding-0.6B-GGUF")
+                except Exception:
+                    kv_cache_llm = model_manager.get_model("Qwen3")
                 
                 # Create KVCacheMemory with direct LLM injection - BYPASSES FACTORY
-                from memos.memories.activation.kv import KVCacheMemory
+                from string_ai_coding_assistant.memos.memories.activation.kv import KVCacheMemory
                 
                 # Manually instantiate KVCacheMemory with shared resources - BYPASSES FACTORY
                 mem_cube._act_mem = object.__new__(KVCacheMemory)
@@ -307,7 +338,7 @@ class ResourceManager:
         
         return {
             "mem_cubes_cached": len(self._mem_cubes),
-            "qdrant_client_shared": self._qdrant_client is not None,
+            "qdrant_client_shared": len(self._qdrant_clients) > 0,
             "embedder_shared": self._embedder is not None,
             "model_manager_stats": model_stats,
             "total_models_loaded": model_stats.get("currently_loaded", 0),

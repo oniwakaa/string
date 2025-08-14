@@ -13,11 +13,8 @@ from pathlib import Path
 from typing import Dict, Any, Optional
 import re
 
-# Add MemOS to Python path
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'MemOS', 'src'))
-
 try:
-    from memos.log import get_logger
+    from string_ai_coding_assistant.memos.log import get_logger
     logger = get_logger(__name__)
 except ImportError:
     import logging

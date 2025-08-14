@@ -14,10 +14,6 @@ from typing import Any, Dict, Optional
 
 from agents.base import BaseAgent, Task, Result
 
-# Add src to path for ModelManager import
-src_path = os.path.join(os.path.dirname(__file__), '..', 'src')
-if src_path not in sys.path:
-    sys.path.insert(0, src_path)
 from models.manager import model_manager
 
 
@@ -38,7 +34,7 @@ class CodeEditorAgent(BaseAgent):
         super().__init__(
             name="SmolLM_CodeEditor",
             role="code_editor",
-            model_name="SmolLM3-3B"
+            model_name="SmolLM3-3B-Q4_K_M"
         )
         
         # Configuration for precise editing using llama-cpp-python

@@ -13,14 +13,10 @@ import sys
 from datetime import datetime
 from typing import Dict, Any, Optional, List
 
-# Add MemOS to Python path
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'MemOS', 'src'))
-
-from config_loader import ConfigLoader, load_config
+from string_ai_coding_assistant.backend.config_loader import ConfigLoader, load_config
 
 # Import ModelManager for centralized model management
 try:
-    sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'src'))
     from models.manager import ModelManager, model_manager
     MODELMANAGER_AVAILABLE = True
 except ImportError as e:
@@ -39,10 +35,10 @@ except ImportError as e:
 
 # Optional MemOS imports for memory functionality
 try:
-    from memos.configs.mem_os import MOSConfig
-    from memos.mem_os.main import MOS
-    from memos.log import get_logger
-    from memos.mem_user.user_manager import UserManager, UserRole
+    from string_ai_coding_assistant.memos.configs.mem_os import MOSConfig
+    from string_ai_coding_assistant.memos.mem_os.main import MOS
+    from string_ai_coding_assistant.memos.log import get_logger
+    from string_ai_coding_assistant.memos.mem_user.user_manager import UserManager, UserRole
     logger = get_logger(__name__)
     MEMOS_AVAILABLE = True
 except ImportError as e:
@@ -53,7 +49,7 @@ except ImportError as e:
 
 # Import our custom LLM wrapper
 try:
-    from llama_cpp_wrapper import LlamaCppWrapper
+    from string_ai_coding_assistant.backend.llama_cpp_wrapper import LlamaCppWrapper
     WRAPPER_AVAILABLE = True
 except ImportError as e:
     logger.warning(f"LlamaCpp wrapper not available: {e}")
@@ -61,7 +57,7 @@ except ImportError as e:
 
 # Import project memory manager
 try:
-    from project_memory_manager import ProjectMemoryManager
+    from string_ai_coding_assistant.backend.project_memory_manager import ProjectMemoryManager
     PROJECT_MEMORY_AVAILABLE = True
 except ImportError as e:
     logger.warning(f"Project memory manager not available: {e}")
@@ -353,7 +349,7 @@ class GGUFMemoryService:
     def _patch_gguf_llm_for_memos(self):
         """Patch the MemOS GGUF LLM class to use our pre-loaded model."""
         try:
-            from memos.llms.gguf import GGUFLLLM
+            from string_ai_coding_assistant.memos.llms.gguf import GGUFLLLM
             
             # Store the original __init__ method
             original_init = GGUFLLLM.__init__
@@ -716,8 +712,8 @@ class GGUFMemoryService:
                     # Create a default memory cube for the user (legacy)
                     cube_id = f"{effective_user_id}_codebase_cube"
                     
-                    from memos.configs.mem_cube import GeneralMemCubeConfig
-                    from memos.mem_cube.general import GeneralMemCube
+                    from string_ai_coding_assistant.memos.configs.mem_cube import GeneralMemCubeConfig
+                    from string_ai_coding_assistant.memos.mem_cube.general import GeneralMemCube
                     
                     cube_config = GeneralMemCubeConfig(
                         user_id=effective_user_id,
@@ -844,7 +840,7 @@ class GGUFMemoryService:
                     # Create memory item
                     if project_mem_cube and project_mem_cube.text_mem:
                         try:
-                            from memos.memories.textual.item import TextualMemoryItem, TextualMemoryMetadata
+                            from string_ai_coding_assistant.memos.memories.textual.item import TextualMemoryItem, TextualMemoryMetadata
                             
                             metadata_obj = TextualMemoryMetadata(
                                 type='fact',
@@ -957,6 +953,15 @@ class GGUFMemoryService:
             logger.error(f"❌ [Load Codebase] Failed: {e}")
             raise RuntimeError(f"Failed to load codebase: {str(e)}")
     
+    def _safe_get_memory_stats(self) -> Dict[str, Any]:
+        """Safely retrieve memory stats from ModelManager with defensive programming."""
+        try:
+            if model_manager and hasattr(model_manager, 'get_memory_stats') and callable(getattr(model_manager, 'get_memory_stats', None)):
+                return model_manager.get_memory_stats()
+        except Exception as e:
+            logger.warning(f"Failed to get memory stats from ModelManager: {e}")
+        return {}
+
     def get_service_status(self) -> Dict[str, Any]:
         """
         Get comprehensive service status information.
@@ -1005,9 +1010,9 @@ class GGUFMemoryService:
                     'using_modelmanager': True,
                 },
                 'modelmanager': {
-                    'memory_stats': model_manager.get_memory_stats(),
-                    'available_models': model_manager.list_available_models(),
-                    'idle_timeout_seconds': model_manager.IDLE_TIMEOUT_SECONDS,
+                    'memory_stats': self._safe_get_memory_stats(),
+                    'available_models': (model_manager.list_available_models() if hasattr(model_manager, 'list_available_models') else list((getattr(model_manager, 'config', {}) or {}).get('models', {}).keys())),
+                    'idle_timeout_seconds': getattr(model_manager, 'IDLE_TIMEOUT_SECONDS', None),
                 },
             }
             

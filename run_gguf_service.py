@@ -15,19 +15,17 @@ import sys
 from contextlib import asynccontextmanager
 from typing import Dict, Any, Optional
 
-# Add MemOS to Python path
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'MemOS', 'src'))
-
 import uvicorn
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
-from config_loader import load_config
-from gguf_memory_service import get_service_instance, shutdown_service
+from string_ai_coding_assistant.backend.config_loader import load_config
+from string_ai_coding_assistant.backend.gguf_memory_service import get_service_instance, shutdown_service
+from string_ai_coding_assistant.backend.init_coordinator import get_init_coordinator, InitPhase
 from agents.orchestrator import ProjectManager
-from project_aware_file_monitor import ProjectAwareFileMonitor, WATCHDOG_AVAILABLE
+from string_ai_coding_assistant.backend.project_aware_file_monitor import ProjectAwareFileMonitor, WATCHDOG_AVAILABLE
 
 # Configure logging
 logging.basicConfig(
@@ -79,57 +77,61 @@ async def lifespan(app: FastAPI):
         
         logger.info(f"ProjectManager initialized successfully (service: {service_host}:{service_port})")
         
-        # Intelligent codebase loading with change detection
+        # Intelligent codebase loading with coordination
+        init_coordinator = get_init_coordinator()
         try:
-            logger.info("🔄 Checking codebase state for intelligent loading...")
-            current_directory = os.getcwd()
-            
-            # Import codebase state manager
-            sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'src'))
-            from core.codebase_state_manager import CodebaseStateManager
-            from core.memignore_filter import MemignoreFilter
-            
-            # Initialize state manager and filter
-            state_manager = CodebaseStateManager(current_directory)
-            memignore_filter = MemignoreFilter()
-            
-            # Get filtered files using existing .memignore logic
-            filtered_files = memignore_filter.filter_codebase_files(current_directory)
-            patterns, memignore_exists = memignore_filter.load_memignore(current_directory)
-            
-            # Check if reload is needed
-            should_reload, changes, current_manifest = state_manager.should_reload_codebase(
-                filtered_files,
-                len(patterns),
-                ".memignore-based" if memignore_exists else "default"
-            )
-            
-            if should_reload:
-                logger.info(f"📥 Loading codebase: {changes.total_changes} changes detected")
-                if changes.new_files:
-                    logger.info(f"   ➕ {len(changes.new_files)} new files")
-                if changes.modified_files:
-                    logger.info(f"   📝 {len(changes.modified_files)} modified files") 
-                if changes.deleted_files:
-                    logger.info(f"   ❌ {len(changes.deleted_files)} deleted files")
+            async def coordinated_codebase_loading():
+                logger.info("🔄 Checking codebase state for intelligent loading...")
+                current_directory = os.getcwd()
                 
-                # Perform full or incremental load
-                startup_load_result = await service.load_codebase(
-                    directory_path=current_directory,
-                    user_id="system_startup",
-                    project_id="default_startup"
+                # Import codebase state manager
+                from src.core.codebase_state_manager import CodebaseStateManager
+                from src.core.memignore_filter import MemignoreFilter
+                
+                # Initialize state manager and filter
+                state_manager = CodebaseStateManager(current_directory)
+                memignore_filter = MemignoreFilter()
+                
+                # Get filtered files using existing .memignore logic
+                filtered_files = memignore_filter.filter_codebase_files(current_directory)
+                patterns, memignore_exists = memignore_filter.load_memignore(current_directory)
+                
+                # Check if reload is needed
+                should_reload, changes, current_manifest = state_manager.should_reload_codebase(
+                    filtered_files,
+                    len(patterns),
+                    ".memignore-based" if memignore_exists else "default"
                 )
                 
-                # Mark load complete
-                state_manager.mark_load_complete(current_manifest)
-                
-                files_loaded = startup_load_result.get('files_loaded', 0)
-                filtering_method = startup_load_result.get('filtering_method', 'unknown')
-                loading_time = startup_load_result.get('loading_time_seconds', 0)
-                logger.info(f"✅ Codebase loading complete: {files_loaded} files loaded in {loading_time:.2f}s using {filtering_method}")
-            else:
-                logger.info("⚡ Codebase is up to date, using existing memory context")
-                logger.info(f"   📁 {current_manifest.total_files} files in memory from previous load")
+                if should_reload:
+                    logger.info(f"📥 Loading codebase: {changes.total_changes} changes detected")
+                    if changes.new_files:
+                        logger.info(f"   ➕ {len(changes.new_files)} new files")
+                    if changes.modified_files:
+                        logger.info(f"   📝 {len(changes.modified_files)} modified files") 
+                    if changes.deleted_files:
+                        logger.info(f"   ❌ {len(changes.deleted_files)} deleted files")
+                    
+                    # Perform full or incremental load
+                    startup_load_result = await service.load_codebase(
+                        directory_path=current_directory,
+                        user_id="system_startup",
+                        project_id="default_startup"
+                    )
+                    
+                    # Mark load complete
+                    state_manager.mark_load_complete(current_manifest)
+                    
+                    files_loaded = startup_load_result.get('files_loaded', 0)
+                    filtering_method = startup_load_result.get('filtering_method', 'unknown')
+                    loading_time = startup_load_result.get('loading_time_seconds', 0)
+                    logger.info(f"✅ Codebase loading complete: {files_loaded} files loaded in {loading_time:.2f}s using {filtering_method}")
+                else:
+                    logger.info("⚡ Codebase is up to date, using existing memory context")
+                    logger.info(f"   📁 {current_manifest.total_files} files in memory from previous load")
+            
+            # Execute codebase loading with coordination
+            await init_coordinator.execute_codebase_loading(coordinated_codebase_loading)
                 
         except Exception as e:
             logger.warning(f"⚠️ Intelligent codebase loading failed: {e}")
@@ -364,7 +366,7 @@ async def chat_with_memory(request: ChatRequest):
         
     except Exception as e:
         logger.error(f"Chat endpoint error: {e}")
-        raise HTTPException(status_code=500, detail=f"Chat generation failed: {str(e)}")
+        raise HTTPException(status_code=503, detail=f"MemOS-required chat failed: {str(e)}. Ensure MemOS is installed at 'string_ai_coding_assistant.memos' and initialized.")
 
 
 @app.get("/health", response_model=HealthResponse, summary="Service health check")
@@ -376,24 +378,63 @@ async def health_check():
     - MemOS service status
     - GGUF model loading and responsiveness
     - Overall service health
+    - Initialization phase information (for startup progress tracking)
     """
     global service
     
     try:
+        # Get initialization coordinator status for startup phase tracking
+        init_coordinator = get_init_coordinator()
+        init_status = init_coordinator.get_initialization_status()
+        current_phase_info = init_coordinator.get_current_phase_info()
+        
         if not service:
+            # Service not yet initialized - provide phase information
+            service_info = {
+                "name": "GGUF Memory Service", 
+                "initialized": False,
+                "init_phase": current_phase_info.get("phase", "idle"),
+                "phase_duration_seconds": current_phase_info.get("phase_duration_seconds"),
+                "total_duration_seconds": init_status.get("total_duration_seconds"),
+                "is_sequential": current_phase_info.get("is_sequential", True)
+            }
+            
+            # Include error information if available
+            phase_results = init_status.get("phase_results", [])
+            failed_phases = [r for r in phase_results if not r["success"]]
+            if failed_phases:
+                latest_error = failed_phases[-1]
+                service_info["error"] = latest_error.get("error_message", "Unknown initialization error")
+                service_info["failed_phase"] = latest_error.get("phase", "unknown")
+            
             return HealthResponse(
                 status="unhealthy",
-                service={"name": "GGUF Memory Service", "initialized": False},
+                service=service_info,
                 memos={"status": "not_initialized"},
                 model={"type": "gguf", "loaded": False, "healthy": False}
             )
         
+        # Service is initialized - get detailed status
         status_info = service.get_service_status()
         is_healthy = service.is_healthy()
         
+        # Enhance service status with initialization information
+        enhanced_service = status_info.get('service', {}).copy()
+        enhanced_service.update({
+            "init_phase": current_phase_info.get("phase", "service_ready"),
+            "phase_duration_seconds": current_phase_info.get("phase_duration_seconds"),
+            "total_duration_seconds": init_status.get("total_duration_seconds"),
+            "is_ready": init_status.get("is_ready", is_healthy),
+            "has_error": init_status.get("has_error", False)
+        })
+        
+        # Include last error if service reports one
+        if hasattr(service, '_last_error') and service._last_error:
+            enhanced_service["last_error"] = service._last_error
+        
         return HealthResponse(
             status="healthy" if is_healthy else "unhealthy",
-            service=status_info.get('service', {}),
+            service=enhanced_service,
             memos=status_info.get('memos', {}),
             model=status_info.get('model', {}),
             config=status_info.get('config', {})
@@ -401,9 +442,23 @@ async def health_check():
         
     except Exception as e:
         logger.error(f"Health check error: {e}")
+        
+        # Try to get phase info even on error
+        try:
+            init_coordinator = get_init_coordinator()
+            current_phase_info = init_coordinator.get_current_phase_info()
+            service_error = {
+                "name": "GGUF Memory Service", 
+                "error": str(e),
+                "init_phase": current_phase_info.get("phase", "error"),
+                "phase_duration_seconds": current_phase_info.get("phase_duration_seconds")
+            }
+        except:
+            service_error = {"name": "GGUF Memory Service", "error": str(e)}
+        
         return HealthResponse(
             status="unhealthy",
-            service={"name": "GGUF Memory Service", "error": str(e)},
+            service=service_error,
             memos={"status": "error"},
             model={"type": "gguf", "loaded": False, "healthy": False}
         )
@@ -469,9 +524,9 @@ async def load_codebase(request: LoadCodebaseRequest):
         logger.error(f"Load codebase validation error: {e}")
         raise HTTPException(status_code=400, detail=str(e))
     except RuntimeError as e:
-        # Service error (e.g., MemOS not available)
+        # MemOS-required endpoint
         logger.error(f"Load codebase runtime error: {e}")
-        raise HTTPException(status_code=503, detail=str(e))
+        raise HTTPException(status_code=503, detail=f"MemOS-required /load_codebase failed: {str(e)}. Ensure MemOS is installed at 'string_ai_coding_assistant.memos' and initialized.")
     except Exception as e:
         # Unexpected error
         logger.error(f"Load codebase unexpected error: {e}")

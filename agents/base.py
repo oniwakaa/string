@@ -11,13 +11,6 @@ from abc import ABC, abstractmethod
 from typing import Any, Optional
 from uuid import UUID, uuid4
 from pydantic import BaseModel, Field
-import sys
-import os
-
-# Add src to path for ModelManager import
-src_path = os.path.join(os.path.dirname(__file__), '..', 'src')
-if src_path not in sys.path:
-    sys.path.insert(0, src_path)
 from models.manager import model_manager
 
 

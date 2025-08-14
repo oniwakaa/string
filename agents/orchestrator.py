@@ -24,14 +24,7 @@ from .web_researcher_optimized import PerformanceOptimizedWebResearcher
 from .code_editor import CodeEditorAgent
 from .specialists import ToolExecutorAgent
 
-# Add the parent directory to path for imports
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from project_memory_manager import ProjectMemoryManager, MEMOS_AVAILABLE
-
-# Add src to path for ModelManager import
-src_path = os.path.join(os.path.dirname(__file__), '..', 'src')
-if src_path not in sys.path:
-    sys.path.insert(0, src_path)
+from string_ai_coding_assistant.backend.project_memory_manager import ProjectMemoryManager, MEMOS_AVAILABLE
 from models.manager import model_manager
 
 
@@ -426,7 +419,7 @@ class DocumentationAgent(BaseAgent):
         super().__init__(
             name="SmolLM_DocumentationAgent",
             role="documentation",
-            model_name="SmolLM3-3B"
+            model_name="SmolLM3-3B-Q4_K_M"
         )
     
     async def execute(self, task: Task) -> Result:

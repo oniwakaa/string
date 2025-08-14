@@ -56,6 +56,22 @@ model:
   loading:
     auto_load: true  # Load model automatically on service startup
     validate_on_load: true  # Validate model file before loading
+    sequential_loading: true  # Load models sequentially to avoid GPU memory conflicts
+    
+  # GPU Memory Management (Apple Silicon M4 optimized)
+  gpu_memory:
+    # Conservative GPU layers for Apple M4 unified memory
+    n_gpu_layers: 20  # Reduced from -1 (unlimited) to prevent OOM
+    max_gpu_memory_mb: 4096  # Reserve 4GB for GPU operations
+    enable_metal_optimization: true
+    metal_batch_limit: 128  # Smaller batches for Metal backend
+    
+  # Context Management 
+  context:
+    # Reduce context for initial loading to save memory
+    startup_n_ctx: 8192  # Half context during startup
+    runtime_n_ctx: 16384  # Full context after successful initialization
+    context_scaling_enabled: true
 
 # Service Configuration
 service:

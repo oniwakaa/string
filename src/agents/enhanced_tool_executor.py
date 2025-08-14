@@ -159,10 +159,10 @@ class EnhancedToolExecutorAgent(BaseAgent):
                 from models.manager import model_manager
                 
                 self.logger.info("Loading SmolLM3-3B for command generation...")
-                self.command_model = model_manager.get_model("SmolLM3-3B")
+                self.command_model = model_manager.get_model("SmolLM3-3B-Q4_K_M")
                 
                 self.logger.info("Loading Gemma3n for action classification...")
-                self.classification_model = model_manager.get_model("gemma-3n-E4B-it")
+                self.classification_model = model_manager.get_model("gemma-3n-E4B-it-Q5_K_S")
                 
                 if self.command_model and self.classification_model:
                     self.status = 'ready'

@@ -164,7 +164,7 @@ class GemmaIntentClassifier(BaseIntentClassifier):
     of prompts and classify them into appropriate intents with confidence scores.
     """
     
-    def __init__(self, registry_path: str = None, model_name: str = "gemma-3n-E4B-it"):
+    def __init__(self, registry_path: str = None, model_name: str = "gemma-3n-E4B-it-Q5_K_S"):
         """
         Initialize the Gemma-based intent classifier.
         
