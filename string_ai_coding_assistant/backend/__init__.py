@@ -1,0 +1,1 @@
+"""Backend module for String AI Coding Assistant"""

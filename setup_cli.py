@@ -592,7 +592,20 @@ class ComprehensiveSetup:
             with open(config_dir / "models.json", 'w') as f:
                 json.dump(models_manifest, f, indent=2)
             
-            # Create runtime_config.yaml
+            # Create runtime_config.yaml with port selection (8000 or next free)
+            host = "0.0.0.0"
+            base_port = 8000
+            selected_port = base_port
+            import socket
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                while selected_port < base_port + 50:
+                    try:
+                        s.bind(("127.0.0.1", selected_port))
+                        break
+                    except OSError:
+                        selected_port += 1
+            
             runtime_config = f"""# String CLI Runtime Configuration
 # Configuration for MemOS with GGUF Model Integration using STRING_HOME paths
 
@@ -624,8 +637,8 @@ service:
     endpoint: "/health"
     include_model_info: true
   api:
-    host: "0.0.0.0"
-    port: 8000
+    host: "{host}"
+    port: {selected_port}
     title: "MemOS with GGUF Integration (Runtime)"
     description: "A persistent service integrating MemOS memory layer with GGUF models from STRING_HOME"
     version: "1.0.0"
@@ -648,6 +661,7 @@ storage:
 logging:
   level: "INFO"
   format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+  file: "{self.string_home}/storage/backend.log"
 """
             
             with open(config_dir / "runtime_config.yaml", 'w') as f:
@@ -793,34 +807,7 @@ logging:
         if not success:
             return False
         
-        # Install llama-cpp-python with proper backend
-        print("🔧 Installing llama-cpp-python with optimized backend...")
-        install_cmd = ["pipx", "runpip", PACKAGE_NAME, "install", "--upgrade", "--force-reinstall", "--no-cache-dir", "llama-cpp-python"]
-        
-        success, _, _ = self.run_command(
-            install_cmd,
-            "Installing llama-cpp-python with backend optimization",
-            env=build_env,
-            timeout=900
-        )
-        
-        if not success:
-            print("⚠️  llama-cpp-python installation had issues, but continuing...")
-        
-        # Install essential CLI and backend dependencies
-        essential_deps = [
-            "huggingface_hub[cli]", 
-            "psutil", 
-            "pathspec",  # Required for .memignore filtering
-            "lxml_html_clean",  # Required for web research agent
-            "numpy<2.0.0"  # Pin for compatibility with llama-cpp-python
-        ]
-        for dep in essential_deps:
-            self.run_command(
-                ["pipx", "runpip", PACKAGE_NAME, "install", dep],
-                f"Installing {dep}",
-                ignore_errors=True
-            )
+        # Defer dependency installs to backend requirements step to control order (pip/setuptools/wheel, numpy pin, requirements)
         
         return True
     
@@ -990,6 +977,20 @@ logging:
         """Install backend requirements via pipx after CLI installation"""
         print("\n📦 Step: Installing backend requirements into pipx environment...")
         
+        # Always upgrade build tooling first
+        self.run_command(
+            ["pipx", "runpip", PACKAGE_NAME, "install", "-U", "pip", "setuptools", "wheel"],
+            "Upgrading pip/setuptools/wheel in pipx venv",
+            ignore_errors=True
+        )
+
+        # Pre-pin numpy before any heavy native builds
+        self.run_command(
+            ["pipx", "runpip", PACKAGE_NAME, "install", "numpy==2.0.0"],
+            "Pre-pinning numpy to 2.0.0",
+            ignore_errors=True
+        )
+
         requirements_files = [
             ("requirements.txt", "Core backend requirements"),
             ("requirements_gguf.txt", "GGUF-specific requirements")
@@ -1011,46 +1012,41 @@ logging:
             else:
                 print(f"⚠️  {req_file} not found, skipping")
         
-        # Install optimized llama-cpp-python if on Apple Silicon
-        if self.is_apple_silicon:
+        # Install optimized llama-cpp-python with platform flags
+        build_env = {}
+        if self.is_apple_silicon or self.reinstall_metal:
             print("🔧 Installing Metal-optimized llama-cpp-python...")
-            build_env = {
+            build_env.update({
                 "CMAKE_ARGS": "-DGGML_METAL=ON -DGGML_METAL_EMBED_LIBRARY=ON",
                 "FORCE_CMAKE": "1"
-            }
-            
-            # First ensure numpy compatibility
-            self.run_command(
-                ["pipx", "runpip", PACKAGE_NAME, "install", "numpy<2.0.0"],
-                "Ensuring numpy compatibility",
-                ignore_errors=True
-            )
-            
-            success, _, stderr = self.run_command(
-                ["pipx", "runpip", PACKAGE_NAME, "install", "--upgrade", "--force-reinstall", "--no-cache-dir", "llama-cpp-python>=0.2.57"],
-                "Installing Metal-optimized llama-cpp-python",
-                env=build_env,
-                timeout=900,
-                ignore_errors=True
-            )
-            
-            if not success:
-                print(f"⚠️  Metal llama-cpp-python installation had issues: {stderr}")
-                print("Backend may use CPU-only mode")
+            })
+        elif self.enable_cuda:
+            print("🔧 Installing CUDA-enabled llama-cpp-python...")
+            build_env.update({
+                "CMAKE_ARGS": "-DGGML_CUDA=ON",
+                "FORCE_CMAKE": "1"
+            })
+        elif self.enable_blas:
+            print("🔧 Installing OpenBLAS-enabled llama-cpp-python...")
+            build_env.update({
+                "CMAKE_ARGS": "-DGGML_BLAS=ON",
+                "FORCE_CMAKE": "1"
+            })
+
+        success, _, stderr = self.run_command(
+            ["pipx", "runpip", PACKAGE_NAME, "install", "--upgrade", "--force-reinstall", "--no-cache-dir", "llama-cpp-python>=0.2.57"],
+            "Installing platform-optimized llama-cpp-python",
+            env=build_env if build_env else None,
+            timeout=900,
+            ignore_errors=True
+        )
+        if not success:
+            print(f"⚠️  llama-cpp-python installation had issues: {stderr}")
+            print("Proceeding; backend may run CPU-only")
         
-        # Install additional critical backend dependencies that might be missing
-        critical_backend_deps = [
-            "pathspec",  # Essential for .memignore filtering
-            "lxml_html_clean",  # Required for web research functionality  
-            "numpy<2.0.0",  # Pin for llama-cpp-python compatibility
-        ]
-        
-        for dep in critical_backend_deps:
-            self.run_command(
-                ["pipx", "runpip", PACKAGE_NAME, "install", dep],
-                f"Ensuring {dep} is available",
-                ignore_errors=True
-            )
+        # Ensure common CLI/back-end tools are present
+        for dep in ["huggingface_hub[cli]", "psutil", "pathspec", "lxml_html_clean"]:
+            self.run_command(["pipx", "runpip", PACKAGE_NAME, "install", dep], f"Ensuring {dep} is available", ignore_errors=True)
         
         return True
     

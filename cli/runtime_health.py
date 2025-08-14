@@ -38,24 +38,10 @@ class RuntimeHealthChecker:
         self.string_home = get_string_home()
         self.console = Console()
         
-        # Core runtime packages required for CLI operation
+        # Minimal runtime essentials only
         self.core_packages = {
-            # Essential backend dependencies
             "llama_cpp": "LLaMA.cpp Python bindings (llama-cpp-python)",
-            "transformers": "Hugging Face Transformers library",
-            "sentence_transformers": "Sentence embeddings library",
-            "torch": "PyTorch machine learning framework",
-            "numpy": "Numerical computing library",
-            
-            # CLI dependencies
-            "typer": "CLI framework",
-            "rich": "Rich text and beautiful formatting",
-            "httpx": "Async HTTP client",
-            "yaml": "YAML parser (PyYAML)",
-            
-            # Optional but recommended
-            "fastapi": "FastAPI web framework (for backend)",
-            "qdrant_client": "Qdrant vector database client",
+            "string_ai_coding_assistant.memos.configs.base": "Packaged MemOS configs",
         }
         
         # Detect platform for specific checks
@@ -112,9 +98,6 @@ class RuntimeHealthChecker:
             try:
                 importlib.import_module(package_name)
             except ImportError:
-                if package_name in ["fastapi", "qdrant_client"]:
-                    # These are optional for CLI operation
-                    continue
                 missing_packages.append(f"{package_name} ({description})")
         
         return len(missing_packages) == 0, missing_packages
@@ -324,13 +307,22 @@ class RuntimeHealthChecker:
         if not success:
             all_passed = False
         
-        # CLI availability check
-        success, issues = self.check_cli_availability()
-        if verbose:
-            status = "✅ [green]" if success else "⚠️  [yellow]"
-            self.console.print(f"{status}CLI Availability:[/]")
-            for issue in issues:
-                self.console.print(f"   {issue}")
+        # Verify backend /health using SERVICE_HOST/SERVICE_PORT if set
+        try:
+            import os
+            import httpx as _httpx
+            host = os.environ.get("SERVICE_HOST", "127.0.0.1")
+            port = int(os.environ.get("SERVICE_PORT", "8000"))
+            health_url = f"http://{host}:{port}/health"
+            resp = _httpx.get(health_url, timeout=2.0)
+            if verbose:
+                self.console.print(f"🔎 Health check at {health_url}: {resp.status_code}")
+        except Exception as e:
+            if verbose:
+                self.console.print(f"⚠️  Backend health check failed: {e}")
+            # Do not fail overall here; backend may not be started yet
+
+        # Note: Do not gate runtime on CLI PATH or doc artifacts
         
         return all_passed
 

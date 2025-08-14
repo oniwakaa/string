@@ -46,6 +46,16 @@ dependencies = [
     "rich>=13.0.0",
     "httpx>=0.27.0",
     "psutil>=5.9.0",
+    
+    # Additional dependencies for backend functionality
+    "pathspec>=0.12.0",  # Required for .memignore filtering
+    "lxml_html_clean>=0.4.0",  # Required for web research agent
+    "neo4j>=5.0.0",  # Required for MemOS graph storage
+    "ctransformers>=0.2.27",  # Required for alternative transformer backends
+    "schedule>=1.2.0",  # Required for MemOS task scheduling
+    "chonkie>=0.1.0",  # Required for text chunking in MemOS
+    "markitdown>=0.0.1",  # Required for document parsing
+    "redis>=5.0.0",  # Required for MemOS scheduling
 ]
 
 [project.optional-dependencies]
@@ -61,6 +71,7 @@ dev = [
 
 [project.scripts]
 string-cli = "cli.main:app"
+run_gguf_service = "string_ai_coding_assistant.backend.service:main"
 
 [project.urls]
 Homepage = "https://github.com/your-org/string-ai-coding-assistant"
@@ -70,7 +81,7 @@ Issues = "https://github.com/your-org/string-ai-coding-assistant/issues"
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["cli*", "src*", "agents*", "config*"]
+include = ["cli*", "src*", "agents*", "config*", "string_ai_coding_assistant*", "models*"]
 exclude = ["tests*", "docs*", "*.tests", "*.tests.*"]
 
 [tool.setuptools.package-data]
