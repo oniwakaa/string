@@ -390,7 +390,23 @@ class GGUFMemoryService:
                 except Exception as e:
                     logger.warning(f"⚠️ Error registering memory cubes: {e}")
             else:
-                logger.info("✅ ResourceManager active - skipping legacy memory cube registration")
+                # CRITICAL FIX: Connect ResourceManager cubes to MemOS instance for search operations
+                logger.info("✅ ResourceManager active - connecting managed cubes to MemOS")
+                if hasattr(self.resource_manager, '_mem_cubes'):
+                    for cube_id, cube_instance in self.resource_manager._mem_cubes.items():
+                        if cube_instance and hasattr(cube_instance, 'text_mem'):
+                            # Connect cube to MemOS instance
+                            self.mos_instance.mem_cubes[cube_id] = cube_instance
+                            # CRITICAL: Register cube with MemOS user manager for search access
+                            try:
+                                # Extract user_id from cube_id (format: userid_projectid_codebase_cube)
+                                cube_user_id = cube_id.split('_')[0] if '_' in cube_id else user_id
+                                self.mos_instance.user_manager.register_mem_cube(cube_user_id, cube_id)
+                                logger.info(f"✅ Connected & registered ResourceManager cube: {cube_id} for user {cube_user_id}")
+                            except Exception as e:
+                                logger.warning(f"⚠️ Failed to register cube {cube_id} with user manager: {e}")
+                                # Still connect for direct access
+                                logger.info(f"✅ Connected ResourceManager cube to MemOS: {cube_id}")
             
             # Test basic functionality - SKIP when ResourceManager is active to prevent Qdrant conflicts
             if not self.resource_manager:

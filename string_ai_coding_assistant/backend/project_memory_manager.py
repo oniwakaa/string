@@ -128,6 +128,28 @@ class ProjectMemoryManager:
             
             if mem_cube:
                 logger.info(f"✅ Project cube '{cube_id}' ready via ResourceManager")
+                
+                # CRITICAL FIX: Register cube with MemOS for search access
+                if self.mos_instance:
+                    try:
+                        # Ensure user exists in MemOS
+                        if not self.mos_instance.user_manager.validate_user(user_id):
+                            from string_ai_coding_assistant.memos.mem_user.user_manager import UserRole
+                            self.mos_instance.user_manager.create_user(
+                                user_name=user_id,
+                                role=UserRole.USER,
+                                user_id=user_id
+                            )
+                            logger.info(f"✅ Created MemOS user: '{user_id}'")
+                        
+                        # Connect cube to MemOS instance
+                        self.mos_instance.mem_cubes[cube_id] = mem_cube
+                        # Register cube with MemOS user manager for search access
+                        self.mos_instance.user_manager.register_mem_cube(user_id, cube_id)
+                        logger.info(f"✅ Registered cube '{cube_id}' with MemOS for user '{user_id}'")
+                    except Exception as e:
+                        logger.warning(f"⚠️ Failed to register cube '{cube_id}' with MemOS: {e}")
+                
                 return cube_id
             else:
                 logger.error(f"❌ ResourceManager failed to create cube '{cube_id}'")
