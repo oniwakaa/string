@@ -94,6 +94,12 @@ if MEMOS_AVAILABLE:
                 top_p = kwargs.get('top_p', getattr(self.config, 'top_p', 0.9))
                 top_k = kwargs.get('top_k', getattr(self.config, 'top_k', 50))
                 
+                # Clear KV cache to prevent exhaustion between requests
+                if hasattr(self.llama, 'reset'):
+                    self.llama.reset()
+                elif hasattr(self.llama, 'n_past'):
+                    self.llama.n_past = 0
+                
                 # Generate response using llama-cpp-python
                 response = self.llama(
                     prompt,
@@ -246,6 +252,12 @@ else:
                 temperature = kwargs.get('temperature', 0.7)
                 top_p = kwargs.get('top_p', 0.9)
                 top_k = kwargs.get('top_k', 50)
+                
+                # Clear KV cache to prevent exhaustion between requests
+                if hasattr(self.llama, 'reset'):
+                    self.llama.reset()
+                elif hasattr(self.llama, 'n_past'):
+                    self.llama.n_past = 0
                 
                 # Generate response using llama-cpp-python
                 response = self.llama(

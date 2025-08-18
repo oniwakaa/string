@@ -12,6 +12,7 @@ import threading
 import psutil
 from typing import Dict, Any, Optional, Union, Tuple
 from pathlib import Path
+from collections import defaultdict
 import logging
 
 # Import model loaders
@@ -85,6 +86,7 @@ class ModelManager:
         self.model_metadata: Dict[str, Dict] = {}
         self.last_used: Dict[str, float] = {}
         self._lock = threading.RLock()
+        self._decode_locks: Dict[str, threading.RLock] = defaultdict(threading.RLock)
         self._memory_monitor_active = False
         self._start_memory_monitor()
         
@@ -254,6 +256,22 @@ class ModelManager:
             logger.info(f"Successfully loaded model: {model_name}")
             return model
     
+    def get_model_with_decode_lock(self, model_name: str):
+        """
+        Get model and its decode lock for sync operations to prevent concurrent decode calls.
+        
+        Usage:
+            model, decode_lock = model_manager.get_model_with_decode_lock("SmolLM3-3B")
+            with decode_lock:
+                result = model(...)  # Only one decode at a time per model
+        
+        Returns:
+            tuple: (model_instance, decode_lock)
+        """
+        model = self.get_model(model_name)
+        decode_lock = self._decode_locks[model_name]
+        return model, decode_lock
+    
     def _load_model(self, model_name: str, model_config: Dict[str, Any]) -> Any:
         """
         Load a model based on its configuration.
@@ -287,8 +305,10 @@ class ModelManager:
                 # Extract llama-cpp specific parameters
                 llama_config = {
                     "model_path": model_path,
-                    "n_ctx": config.get("n_ctx", 16384),
-                    "n_gpu_layers": config.get("n_gpu_layers", -1),
+                    "n_ctx": min(config.get("n_ctx", 16384), 16384),  # Restore original context size
+                    "n_batch": min(config.get("n_batch", 512), 512),   # Larger batch for better GPU utilization
+                    "n_threads": min(config.get("n_threads", 8), 8),
+                    "n_gpu_layers": config.get("n_gpu_layers", 20),    # Conservative GPU layers for Apple Silicon
                     "verbose": False
                 }
                 

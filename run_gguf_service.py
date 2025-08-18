@@ -26,6 +26,7 @@ from string_ai_coding_assistant.backend.gguf_memory_service import get_service_i
 from string_ai_coding_assistant.backend.init_coordinator import get_init_coordinator, InitPhase
 from agents.orchestrator import ProjectManager
 from string_ai_coding_assistant.backend.project_aware_file_monitor import ProjectAwareFileMonitor, WATCHDOG_AVAILABLE
+from models.registry import get_model_registry, get_preload_config
 
 # Configure logging
 logging.basicConfig(
@@ -48,9 +49,33 @@ async def lifespan(app: FastAPI):
     global service, project_manager, file_monitor
     
     try:
-        # Startup
+        # Startup - Serial Model Preloading First
+        logger.info("🔥 Starting serial model preloading...")
+        registry = get_model_registry()
+        preload_config = get_preload_config()
+        
+        # Preload critical models first (fail fast)
+        critical_models = preload_config["critical"]
+        if critical_models:
+            logger.info(f"Loading critical models: {critical_models}")
+            critical_results = await registry.preload_models_serial(critical_models, critical_only=True)
+            failed_critical = [m for m, success in critical_results.items() if not success]
+            if failed_critical:
+                raise RuntimeError(f"Critical models failed to load: {failed_critical}")
+        
+        # Preload additional models (best effort)
+        additional_models = preload_config["additional"]
+        if additional_models:
+            logger.info(f"Loading additional models: {additional_models}")
+            await registry.preload_models_serial(additional_models, critical_only=False)
+        
+        # Log preload summary
+        stats = registry.get_stats()
+        logger.info(f"✅ Model preload complete: {stats['ready_models']}/{stats['total_models']} ready in {stats.get('startup_duration_ms', 0):.0f}ms")
+        
+        # Now start the service with registry
         logger.info("Starting GGUF Memory Service...")
-        service = await get_service_instance()
+        service = await get_service_instance(registry=registry)
         logger.info("GGUF Memory Service started successfully")
         
         # Initialize ProjectManager for agentic tasks
@@ -432,11 +457,23 @@ async def health_check():
         if hasattr(service, '_last_error') and service._last_error:
             enhanced_service["last_error"] = service._last_error
         
+        # Add model registry status
+        registry = get_model_registry()
+        registry_stats = registry.get_stats()
+        
+        # Determine overall health based on model readiness
+        overall_status = "healthy" if is_healthy else "unhealthy"
+        if registry_stats["ready_models"] == 0 and registry_stats["total_models"] > 0:
+            overall_status = "degraded"
+        
         return HealthResponse(
-            status="healthy" if is_healthy else "unhealthy",
+            status=overall_status,
             service=enhanced_service,
             memos=status_info.get('memos', {}),
-            model=status_info.get('model', {}),
+            model={
+                **status_info.get('model', {}),
+                "registry": registry_stats
+            },
             config=status_info.get('config', {})
         )
         

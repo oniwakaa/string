@@ -230,7 +230,10 @@ Intent:"""
                 from models.manager import model_manager
                 
                 logger.info(f"Loading {self.model_name} for intent classification...")
+                # Use ModelManager directly for sync operations
+                # Registry is async-only, so intent classifier continues using ModelManager
                 self.model = model_manager.get_model(self.model_name)
+                self.registry = None
                 if not self.model:
                     raise RuntimeError(f"Failed to load model: {self.model_name}")
                 logger.info("Model loaded successfully for intent classification")
@@ -256,6 +259,18 @@ Intent:"""
             # Ensure model is loaded
             self._load_model()
             
+            # Verify model is actually ready for inference
+            if self.model is None:
+                logger.warning("Model not ready for classification")
+                return IntentClassification(
+                    primary_intent="general_query",
+                    confidence=0.1,
+                    secondary_intents=[],
+                    workflow=None,
+                    context_modifiers=[],
+                    metadata={"error": "model_not_ready", "fallback": True}
+                )
+            
             # Prepare the minimal classification prompt
             classification_prompt = self._classification_prompt_template.format(
                 prompt=prompt, 
@@ -267,14 +282,29 @@ Intent:"""
                 context_info = f"\nContext: {context}"
                 classification_prompt += context_info
             
-            # Generate classification using Gemma (optimized for minimal prompts)
-            response = self.model(
-                classification_prompt,
-                max_tokens=20,  # Minimal tokens for simple classification
-                temperature=0.1,  # Low temperature for consistent classification
-                top_p=0.9,
-                stop=["User:", "Intent:", "Categories:", "\n\n"]
-            )
+            # Generate classification using Gemma with decode lock to prevent concurrency issues
+            try:
+                from models.manager import model_manager
+                _, decode_lock = model_manager.get_model_with_decode_lock(self.model_name)
+                with decode_lock:
+                    response = self.model(
+                        classification_prompt,
+                        max_tokens=20,  # Minimal tokens for simple classification
+                        temperature=0.1,  # Low temperature for consistent classification
+                        top_p=0.9,
+                        stop=["User:", "Intent:", "Categories:", "\n\n"]
+                    )
+            except Exception as lock_error:
+                logger.error(f"Model decode lock failed, cannot classify: {lock_error}")
+                # Return fallback classification when model is unavailable
+                return IntentClassification(
+                    primary_intent="general_query",
+                    confidence=0.1,
+                    secondary_intents=[],
+                    workflow=None,
+                    context_modifiers=[],
+                    metadata={"error": "model_unavailable", "fallback": True}
+                )
             
             # Extract and parse the simple response (no JSON expected)
             classification_text = response['choices'][0]['text'].strip()

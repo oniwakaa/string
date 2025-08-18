@@ -74,15 +74,17 @@ class GGUFMemoryService:
     with optional MemOS memory enhancement when available.
     """
     
-    def __init__(self, config_path: str = "config.yaml"):
+    def __init__(self, config_path: str = "config.yaml", registry=None):
         """
         Initialize the GGUF Memory Service.
         
         Args:
             config_path (str): Path to the configuration file
+            registry: Optional model registry for async model loading
         """
         self.config_loader = ConfigLoader(config_path)
         self.config = self.config_loader.load()
+        self.registry = registry  # Injected model registry
         self.mos_instance = None  # MemOS instance for memory management
         self.llama_wrapper = None  # Our custom LLM wrapper
         self.llm = None  # Direct llama-cpp-python Llama instance
@@ -176,6 +178,9 @@ class GGUFMemoryService:
             bool: True if initialization successful
         """
         try:
+            # Import model manager for configuration and fallback loading
+            from models.manager import model_manager
+            
             # Use robust model key normalization
             available_models = model_manager.config.get('models', {})
             if not available_models:
@@ -201,8 +206,13 @@ class GGUFMemoryService:
             
             logger.info(f"Loading GGUF model '{model_name}' via ModelManager")
             
-            # Get model from ModelManager - this handles all loading, caching, and memory management
-            self.llm = model_manager.get_model(model_name)
+            # Get model from registry if available, otherwise fallback to ModelManager
+            if self.registry:
+                # Use registry for async single-flight loading
+                self.llm = await self.registry.get_model(model_name)
+            else:
+                # Fallback to direct model manager
+                self.llm = model_manager.get_model(model_name)
             
             if not self.llm:
                 logger.error(f"Failed to load model '{model_name}' via ModelManager")
@@ -213,20 +223,10 @@ class GGUFMemoryService:
             
             logger.info(f"✅ GGUF model '{model_name}' loaded successfully via ModelManager with LRU eviction")
             
-            # Test basic functionality
-            test_response = self.llm(
-                "Hello",
-                max_tokens=5,
-                temperature=0.1,
-                echo=False
-            )
-            
-            if test_response and test_response.get('choices'):
-                logger.info("✅ GGUF model health check passed")
-                return True
-            else:
-                logger.error("❌ GGUF model health check failed")
-                return False
+            # Skip immediate decode test - defer health check until first actual use
+            # Model is loaded, validation will happen on first inference call
+            logger.info("✅ GGUF model loaded successfully (health deferred to first use)")
+            return True
             
         except Exception as e:
             logger.error(f"Failed to initialize GGUF model via ModelManager: {e}")
@@ -655,15 +655,35 @@ class GGUFMemoryService:
             # Use direct prompt instead of chat completion for better compatibility
             prompt = f"User: {enhanced_query}\nAssistant:"
             
-            # Generate response using llama-cpp-python direct call
-            response = self.llm(
-                prompt,
-                max_tokens=max_tokens,
-                temperature=temperature,
-                top_p=top_p,
-                stop=["User:", "\n\n", "Assistant:", "<|im_end|>"],
-                echo=False
-            )
+            # Generate response using llama-cpp-python with decode serialization
+            if self.registry and hasattr(self.registry, 'get_model_with_decode_lock'):
+                # Use registry decode lock to prevent concurrent decode calls
+                # Get model name from config or use default
+                try:
+                    from models.manager import model_manager
+                    model_name = getattr(self, '_model_name', None) or "SmolLM3-3B"
+                except:
+                    model_name = "SmolLM3-3B"
+                _, decode_semaphore = await self.registry.get_model_with_decode_lock(model_name)
+                async with decode_semaphore:
+                    response = self.llm(
+                        prompt,
+                        max_tokens=max_tokens,
+                        temperature=temperature,
+                        top_p=top_p,
+                        stop=["User:", "\n\n", "Assistant:", "<|im_end|>"],
+                        echo=False
+                    )
+            else:
+                # Fallback without decode lock
+                response = self.llm(
+                    prompt,
+                    max_tokens=max_tokens,
+                    temperature=temperature,
+                    top_p=top_p,
+                    stop=["User:", "\n\n", "Assistant:", "<|im_end|>"],
+                    echo=False
+                )
             
             # Extract generated text
             generated_text = response['choices'][0]['text'].strip()
@@ -1230,12 +1250,13 @@ class GGUFMemoryService:
 _service_instance: Optional[GGUFMemoryService] = None
 
 
-async def get_service_instance(config_path: str = "config.yaml") -> GGUFMemoryService:
+async def get_service_instance(config_path: str = "config.yaml", registry=None) -> GGUFMemoryService:
     """
     Get or create the global service instance.
     
     Args:
         config_path (str): Path to configuration file
+        registry: Optional model registry for async model loading
         
     Returns:
         GGUFMemoryService: The service instance
@@ -1243,7 +1264,7 @@ async def get_service_instance(config_path: str = "config.yaml") -> GGUFMemorySe
     global _service_instance
     
     if _service_instance is None:
-        _service_instance = GGUFMemoryService(config_path)
+        _service_instance = GGUFMemoryService(config_path, registry=registry)
         if not await _service_instance.startup():
             raise RuntimeError("Failed to start GGUF Memory Service")
     

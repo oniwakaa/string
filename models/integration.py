@@ -8,6 +8,7 @@ with existing agent code and MemOS components.
 import logging
 from typing import Any, Optional, Dict
 from .manager import model_manager
+from .registry import get_model_registry
 
 logger = logging.getLogger(__name__)
 
@@ -36,6 +37,44 @@ def get_agent_model(agent_name: str) -> Any:
     """
     try:
         return model_manager.get_model_for_agent(agent_name)
+    except Exception as e:
+        logger.error(f"Failed to get model for agent {agent_name}: {e}")
+        raise
+
+async def get_agent_model_async(agent_name: str) -> Any:
+    """
+    Async version of get_agent_model using the model registry.
+    
+    Args:
+        agent_name: Name of the agent (e.g., 'CodebaseExpertAgent')
+        
+    Returns:
+        Model instance configured for the agent
+        
+    Example:
+        model = await get_agent_model_async('CodebaseExpertAgent')
+        response = model.create_completion(prompt="...", max_tokens=512)
+    """
+    try:
+        registry = get_model_registry()
+        
+        # Get agent mapping to determine resolved model name
+        agent_mapping = model_manager.config.get("agent_mapping", {})
+        model_name = agent_mapping.get(agent_name)
+        
+        if not model_name:
+            # Fallback to default model - use ModelManager's normalization
+            try:
+                model_name = model_manager._normalize_model_key("SmolLM3-3B")
+            except:
+                # Ultimate fallback to first available model
+                available_models = list(model_manager.config.get("models", {}).keys())
+                if available_models:
+                    model_name = available_models[0]
+                else:
+                    raise RuntimeError("No models available for agent")
+            
+        return await registry.get_model(model_name)
     except Exception as e:
         logger.error(f"Failed to get model for agent {agent_name}: {e}")
         raise

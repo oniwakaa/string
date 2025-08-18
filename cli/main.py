@@ -515,13 +515,18 @@ async def _run_interactive_session():
     current_dir = Path.cwd()
     
     try:
-        # Ensure backend is running
+        # Check if backend is already running (avoid double startup)
         backend_manager = get_backend_manager()
-        if not await backend_manager.ensure_backend_running():
-            console.print("❌ [red]Failed to start backend. Interactive session cannot continue.[/red]")
-            return
+        is_running, _ = backend_manager.is_backend_running()
         
-        session_state.backend_started_by_session = True
+        if not is_running:
+            # Only start if not already running
+            if not await backend_manager.ensure_backend_running():
+                console.print("❌ [red]Failed to start backend. Interactive session cannot continue.[/red]")
+                return
+            session_state.backend_started_by_session = True
+        else:
+            console.print("🔄 Using existing backend instance...")
         
         # Check initial backend health and display any errors
         try:

@@ -47,9 +47,34 @@ async def lifespan(app: FastAPI):
     global service, project_manager, file_monitor
     
     try:
-        # Startup
+        # Startup - Serial Model Preloading First
+        logger.info("🔥 Starting serial model preloading...")
+        from models.registry import get_model_registry, get_preload_config
+        registry = get_model_registry()
+        preload_config = get_preload_config()
+        
+        # Preload critical models first (fail fast)
+        critical_models = preload_config["critical"]
+        if critical_models:
+            logger.info(f"Loading critical models: {critical_models}")
+            critical_results = await registry.preload_models_serial(critical_models, critical_only=True)
+            failed_critical = [m for m, success in critical_results.items() if not success]
+            if failed_critical:
+                raise RuntimeError(f"Critical models failed to load: {failed_critical}")
+        
+        # Preload additional models (best effort)
+        additional_models = preload_config["additional"]
+        if additional_models:
+            logger.info(f"Loading additional models: {additional_models}")
+            await registry.preload_models_serial(additional_models, critical_only=False)
+        
+        # Log preload summary
+        stats = registry.get_stats()
+        logger.info(f"✅ Model preload complete: {stats['ready_models']}/{stats['total_models']} ready in {stats.get('startup_duration_ms', 0):.0f}ms")
+        
+        # Now start the service with registry
         logger.info("Starting GGUF Memory Service...")
-        service = await get_service_instance()
+        service = await get_service_instance(registry=registry)
         logger.info("GGUF Memory Service started successfully")
         
         # Initialize ProjectManager for agentic tasks
@@ -109,12 +134,21 @@ async def lifespan(app: FastAPI):
                 if changes.deleted_files:
                     logger.info(f"   ❌ {len(changes.deleted_files)} deleted files")
                 
-                # Perform full or incremental load
-                startup_load_result = await service.load_codebase(
-                    directory_path=current_directory,
-                    user_id="system_startup",
-                    project_id="default_startup"
-                )
+                # Perform full or incremental load with timeout to prevent startup hang
+                try:
+                    startup_load_result = await asyncio.wait_for(
+                        service.load_codebase(
+                            directory_path=current_directory,
+                            user_id="system_startup",
+                            project_id="default_startup"
+                        ),
+                        timeout=30.0  # 30 second timeout for startup
+                    )
+                except asyncio.TimeoutError:
+                    logger.warning("⚠️ Codebase loading timed out during startup - deferring to background")
+                    # Defer to background and continue startup
+                    asyncio.create_task(_background_codebase_load(service, current_directory, current_manifest, state_manager))
+                    startup_load_result = {"files_loaded": 0, "deferred": True}
                 
                 # Mark load complete
                 state_manager.mark_load_complete(current_manifest)
@@ -902,6 +936,23 @@ def main():
         h11_max_incomplete_event_size=16 * 1024 * 1024,  # 16MB for large requests
         backlog=2048  # Increased connection backlog
     )
+
+
+async def _background_codebase_load(service, directory_path, manifest, state_manager):
+    """Background codebase loading to prevent startup hang."""
+    try:
+        logger.info("🔄 Starting background codebase loading...")
+        result = await service.load_codebase(
+            directory_path=directory_path,
+            user_id="system_startup_bg",
+            project_id="default_startup_bg"
+        )
+        state_manager.mark_load_complete(manifest)
+        files_loaded = result.get('files_loaded', 0)
+        loading_time = result.get('loading_time_seconds', 0)
+        logger.info(f"✅ Background codebase loading complete: {files_loaded} files in {loading_time:.2f}s")
+    except Exception as e:
+        logger.error(f"❌ Background codebase loading failed: {e}")
 
 
 if __name__ == "__main__":
