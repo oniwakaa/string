@@ -157,3 +157,80 @@ If the automated setup fails:
 2. Try manual installation: `pipx install .`
 3. Review troubleshooting section above
 4. Report issues with full error output
+
+## 🔧 Backend Service Enhancements
+
+### Content Sanitization
+
+The system now includes automatic content sanitization for files created by AI agents to ensure clean, executable code:
+
+- **Purpose**: Removes chat artifacts, markdown formatting, and conversation metadata from model outputs
+- **Behavior**: Extracts code from fenced blocks, preserves shebangs and imports, removes explanatory text
+- **Configuration**: Controlled via `./string/config/runtime_config.yaml` under `file_processing.sanitizer.enabled`
+- **Default**: Enabled by default for all file creation operations
+
+### Memory Search API Compatibility
+
+Enhanced MemOS integration with automatic parameter normalization:
+
+- **Parameter Mapping**: Automatically maps `top_k` to upstream-accepted parameter names
+- **Compatibility**: Ensures all search calls work with current MemOS API versions
+- **Performance**: No impact on search functionality or speed
+- **Logging**: Reduced warning messages from parameter mismatches
+
+### CodeEditorAgent Robustness
+
+Improved code extraction and validation for AI-generated edits:
+
+- **Fallback Extraction**: Uses heuristic code detection when fenced blocks are missing
+- **Single Retry**: Implements one guided retry with explicit formatting instructions
+- **Syntax Validation**: Pre-commit syntax checking for Python files using AST parsing
+- **Logging Strategy**: Tracks which extraction method succeeded (fenced vs heuristic)
+- **Error Handling**: Graceful degradation with clear error messages on validation failure
+
+### Performance Monitoring
+
+Added timing measurements for retrieval operations:
+
+- **Timing Breakdown**: Separates preprocessing, search, and total operation time
+- **Compact Logging**: Performance metrics logged in structured format under `./string/storage/logs/`
+- **Example Format**: `timing: total=2.341s (prep=0.012s, search=2.329s)`
+- **No Guardrails**: Full flexibility for agents to retrieve relevant files based on query relevance
+
+### Model Stability
+
+Maintained single-model-per-process architecture:
+
+- **Main Backend**: SmolLM3-3B only via environment variable configuration
+- **No Classifier Subprocess**: Intent classification integrated within main process
+- **Health Endpoints**: Minimal payload without decode operations
+- **Port Isolation**: Single service on port 8000 with proper PID management
+
+### Configuration Toggles
+
+New runtime configuration options in `./string/config/runtime_config.yaml`:
+
+```yaml
+# File processing configuration
+file_processing:
+  sanitizer:
+    enabled: true
+    preserve_structure: true
+```
+
+### Troubleshooting
+
+**Content Sanitization Issues**:
+- Files contain raw model output: Check sanitizer configuration
+- Code structure lost: Verify `preserve_structure: true` setting
+- Imports missing: Sanitizer preserves shebangs and imports automatically
+
+**CodeEditorAgent Parse Failures**:
+- Check agent logs for extraction strategy used (fenced vs heuristic)
+- Syntax errors: Pre-commit validation catches issues before file write
+- Single retry mechanism provides fallback for formatting issues
+
+**Memory Search Warnings**:
+- Parameter warnings resolved automatically via normalization adapter
+- No action required from operators
+- Search functionality maintained with full compatibility

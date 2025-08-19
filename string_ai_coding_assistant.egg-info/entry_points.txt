@@ -1,0 +1,3 @@
+[console_scripts]
+run_gguf_service = string_ai_coding_assistant.backend.service:main
+string-cli = cli.main:app

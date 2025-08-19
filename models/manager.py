@@ -52,15 +52,21 @@ def _manifest_to_internal_config(manifest: Dict[str, Any], string_home: Path) ->
         if not all([name, filename, local_dir]):
             continue
         model_path = (models_dir / local_dir / filename).as_posix()
+        # Special configuration for classifier models
+        if name == "Gemma-3-270m-it-classifier":
+            gpu_layers = int(os.getenv("STRING_CLASSIFIER_ON_GPU", "0"))
+        else:
+            gpu_layers = -1  # Default GPU acceleration for main models
+            
         entry = {
             "loader": "gguf",
             "path": model_path,
             "config": {
                 "n_ctx": 16384,
-                "n_gpu_layers": -1,
+                "n_gpu_layers": gpu_layers,
             },
             "priority": "high" if "SmolLM3-3B" in name else "medium",
-            "purpose": "general",
+            "purpose": "classifier" if name == "Gemma-3-270m-it-classifier" else "general",
         }
         # Full name key
         internal["models"][name] = entry
@@ -201,6 +207,7 @@ class ModelManager:
             "Gemma-3n-E4B-it": "gemma-3n-E4B-it-Q5_K_S",
             "gemma-3n-E4B-it": "gemma-3n-E4B-it-Q5_K_S",  # Case variant
             "Qwen3-1.7B": "Qwen3-1.7B-Q5_K_M",
+            "gemma-3-270m-it": "Gemma-3-270m-it-classifier",  # Classifier alias
         }
         if requested in alias_map and alias_map[requested] in models:
             return alias_map[requested]

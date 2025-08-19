@@ -164,16 +164,20 @@ class GemmaIntentClassifier(BaseIntentClassifier):
     of prompts and classify them into appropriate intents with confidence scores.
     """
     
-    def __init__(self, registry_path: str = None, model_name: str = "gemma-3n-E4B-it-Q5_K_S"):
+    def __init__(self, registry_path: str = None, model_name: str = None):
         """
         Initialize the Gemma-based intent classifier.
         
         Args:
             registry_path: Path to the agent intent registry
-            model_name: Name of the model to use for classification
+            model_name: Name of the model to use for classification (defaults to env var or Gemma-3-270m-it-classifier)
         """
         super().__init__(registry_path)
+        # Use config-driven model name with fallback
+        if model_name is None:
+            model_name = os.getenv("STRING_CLASSIFIER_MODEL_NAME", "Gemma-3-270m-it-classifier")
         self.model_name = model_name
+        logger.info(f"🤖 Intent classifier initialized with model: {self.model_name}")
         self.model = None
         self._classification_prompt_template = None
         self._setup_classification_prompt()

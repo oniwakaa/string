@@ -16,6 +16,7 @@ Date: 2024-12-19
 import os
 import sys
 import logging
+import time
 from typing import Dict, Any, Optional, List, TYPE_CHECKING
 
 # Import ResourceManager for shared resource management via package path
@@ -145,7 +146,7 @@ class ProjectMemoryManager:
                         # Connect cube to MemOS instance
                         self.mos_instance.mem_cubes[cube_id] = mem_cube
                         # Register cube with MemOS user manager for search access
-                        self.mos_instance.user_manager.register_mem_cube(user_id, cube_id)
+                        self.mos_instance.user_manager.add_user_to_cube(user_id, cube_id)
                         logger.info(f"✅ Registered cube '{cube_id}' with MemOS for user '{user_id}'")
                     except Exception as e:
                         logger.warning(f"⚠️ Failed to register cube '{cube_id}' with MemOS: {e}")
@@ -168,6 +169,25 @@ class ProjectMemoryManager:
         # ResourceManager handles caching, so we can always return True
         # and let it handle the existence check internally
         return True
+
+    def get_project_cube_info(self, user_id: str, project_id: str) -> Optional[Dict[str, Any]]:
+        """Get project cube information for orchestrator compatibility."""
+        try:
+            cube_id = self._generate_project_cube_id(user_id, project_id)
+            collection_name = self._generate_collection_name(user_id, project_id)
+            
+            return {
+                'cube_id': cube_id,
+                'user_id': user_id,
+                'project_id': project_id,
+                'collection_name': collection_name,
+                'storage_path': f"{user_id}/{project_id}/codebase",
+                'exists': self.project_cube_exists(user_id, project_id),
+                'resource_manager_available': self.resource_manager is not None
+            }
+        except Exception as e:
+            logger.error(f"Failed to get project cube info: {e}")
+            return None
     
     def add_memory_to_project(
         self, 
@@ -202,6 +222,28 @@ class ProjectMemoryManager:
             logger.error(f"Failed to add memory to project: {e}")
             return False
     
+    def _normalize_search_params(self, **kwargs) -> Dict[str, Any]:
+        """Normalize search parameters to match MemOS API expectations."""
+        # Map common parameter variations to upstream-accepted names
+        normalized = {}
+        for key, value in kwargs.items():
+            if key == 'top_k':
+                # MemOS uses 'k' instead of 'top_k'
+                if hasattr(self.mos_instance, 'search'):
+                    # Check if search method accepts 'k' parameter by introspection
+                    import inspect
+                    sig = inspect.signature(self.mos_instance.search)
+                    if 'k' in sig.parameters:
+                        normalized['k'] = value
+                    # Skip unsupported parameters silently
+            elif key in ['query', 'user_id', 'mem_cube_id']:
+                # These are standard parameters
+                normalized[key] = value
+            else:
+                # Pass through other parameters as-is
+                normalized[key] = value
+        return normalized
+
     def search_project_memories(
         self, 
         user_id: str, 
@@ -214,23 +256,68 @@ class ProjectMemoryManager:
             logger.error("MemOS instance not available")
             return None
         
+        # Start timing for performance measurement
+        start_time = time.time()
+        preprocessing_time = 0
+        search_time = 0
+        
         try:
             cube_id = self._generate_project_cube_id(user_id, project_id)
             
-            # Use MemOS search (ResourceManager provides the underlying resources)
-            results = self.mos_instance.search(
+            # Measure preprocessing time
+            preprocessing_start = time.time()
+            # Normalize parameters for MemOS compatibility
+            search_params = self._normalize_search_params(
                 query=query,
-                mem_cube_id=cube_id,
                 user_id=user_id,
                 top_k=top_k
             )
+            preprocessing_time = time.time() - preprocessing_start
             
-            logger.info(f"✅ Searched project {project_id} for user {user_id}: {len(results) if results else 0} results")
+            # Measure search time
+            search_start = time.time()
+            # Use MemOS search with normalized parameters
+            results = self.mos_instance.search(**search_params)
+            search_time = time.time() - search_start
+            
+            total_time = time.time() - start_time
+            
+            # Log timing measurements in compact format
+            logger.info(f"✅ Search complete - project: {project_id}, user: {user_id}, "
+                       f"results: {len(results) if results else 0}, "
+                       f"timing: total={total_time:.3f}s (prep={preprocessing_time:.3f}s, "
+                       f"search={search_time:.3f}s)")
+            
             return results
             
         except Exception as e:
             logger.error(f"Failed to search project memories: {e}")
             return None
+
+    def search_project_memory(
+        self, 
+        user_id: str, 
+        project_id: str, 
+        query: str, 
+        top_k: int = 5
+    ) -> Optional[Dict[str, Any]]:
+        """Alias for search_project_memories - returns formatted results for orchestrator."""
+        results = self.search_project_memories(user_id, project_id, query, top_k)
+        if results:
+            # Format results to match expected orchestrator interface
+            return {
+                'text_mem': [
+                    {
+                        'memories': [
+                            {
+                                'memory': result.get('content', result.get('text', '')),
+                                'score': result.get('score', 0.0)
+                            } for result in results
+                        ]
+                    }
+                ]
+            }
+        return None
     
     def get_project_stats(self, user_id: str, project_id: str) -> Dict[str, Any]:
         """Get project memory statistics via ResourceManager."""

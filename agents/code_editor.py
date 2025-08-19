@@ -10,6 +10,7 @@ import ast
 import re
 import sys
 import os
+import logging
 from typing import Any, Dict, Optional
 
 from agents.base import BaseAgent, Task, Result
@@ -36,6 +37,9 @@ class CodeEditorAgent(BaseAgent):
             role="code_editor",
             model_name="SmolLM3-3B-Q4_K_M"
         )
+        
+        # Initialize logger for this agent
+        self.logger = logging.getLogger(f"CodeEditorAgent.{self.name}")
         
         # Configuration for precise editing using llama-cpp-python
         self.llama_config = {
@@ -182,25 +186,44 @@ class CodeEditorAgent(BaseAgent):
 
     def _parse_and_validate_output(self, llm_response: str, language: str) -> str:
         """
-        Parses the LLM's response to extract and validate the code.
+        Parses the LLM's response to extract and validate the code with fallback strategies.
         
         This method:
         - Extracts code from various response formats
+        - Uses heuristic fallback when fenced blocks are missing
         - Validates syntax for supported languages
-        - Cleans up formatting issues
+        - Implements single retry on parse failure
         - Ensures the code is ready for use
         """
         # Step 1: Extract the code from the response
         extracted_code = self._extract_code_block(llm_response)
         
         if not extracted_code:
-            raise ValueError("LLM response did not contain a valid code block")
+            self.logger.warning("No fenced code blocks found, trying heuristic extraction")
+            extracted_code = self._heuristic_code_extraction(llm_response, language)
+            
+        if not extracted_code:
+            # Single retry with explicit instruction
+            self.logger.info("Retrying with explicit code block instruction")
+            retry_response = self._retry_with_explicit_instruction(llm_response)
+            extracted_code = self._extract_code_block(retry_response)
+            
+        if not extracted_code:
+            raise ValueError("LLM response did not contain extractable code after retry")
 
         # Step 2: Clean up the extracted code
         cleaned_code = self._clean_code_output(extracted_code)
 
         # Step 3: Validate syntax for supported languages
-        self._validate_syntax(cleaned_code, language)
+        try:
+            self._validate_syntax(cleaned_code, language)
+        except SyntaxError as e:
+            self.logger.error(f"Syntax validation failed: {e}")
+            raise ValueError(f"Generated code has syntax errors: {e}")
+
+        # Log which extraction method was successful
+        extraction_method = "fenced_blocks" if "```" in llm_response else "heuristic_extraction"
+        self.logger.info(f"Code extracted using: {extraction_method}")
 
         return cleaned_code
 
@@ -391,6 +414,138 @@ class CodeEditorAgent(BaseAgent):
     def get_supported_languages(self) -> list[str]:
         """Return list of languages with syntax validation support."""
         return ["python", "javascript", "js", "java", "c", "cpp", "c++"]
+
+    def _heuristic_code_extraction(self, response: str, language: str) -> str:
+        """
+        Heuristic extraction when fenced code blocks are not present.
+        
+        This method looks for code-like patterns and tries to extract
+        the most likely code segment from mixed content.
+        """
+        lines = response.split('\n')
+        code_lines = []
+        in_code_block = False
+        code_density_threshold = 0.4
+        
+        # Language-specific code indicators
+        if language.lower() == "python":
+            code_indicators = [
+                r'^\s*def\s+\w+', r'^\s*class\s+\w+', r'^\s*import\s+\w+',
+                r'^\s*from\s+\w+', r'^\s*if\s+.*:', r'^\s*for\s+.*:',
+                r'^\s*while\s+.*:', r'^\s*try\s*:', r'^\s*except\s*.*:',
+                r'^\s*with\s+.*:', r'^\s*@\w+', r'^\s*return\s+',
+                r'^\s*yield\s+', r'^\s*raise\s+', r'^\s*assert\s+'
+            ]
+        else:
+            # Generic code indicators
+            code_indicators = [
+                r'^\s*function\s+\w+', r'^\s*var\s+\w+', r'^\s*let\s+\w+',
+                r'^\s*const\s+\w+', r'^\s*public\s+', r'^\s*private\s+',
+                r'^\s*if\s*\(', r'^\s*for\s*\(', r'^\s*while\s*\('
+            ]
+        
+        # Find segments that look like code
+        current_segment = []
+        segments = []
+        
+        for line in lines:
+            stripped_line = line.strip()
+            
+            # Skip obvious chat artifacts
+            if any(artifact in stripped_line.lower() for artifact in [
+                'here is', 'here\'s the', 'based on', 'i have', 'let me', 'this code'
+            ]):
+                if current_segment and self._calculate_code_density(current_segment) > code_density_threshold:
+                    segments.append('\n'.join(current_segment))
+                current_segment = []
+                continue
+            
+            # Check if line looks like code
+            is_code_like = False
+            if stripped_line:
+                # Check against patterns
+                for pattern in code_indicators:
+                    if re.match(pattern, line):
+                        is_code_like = True
+                        break
+                
+                # Additional heuristics
+                if not is_code_like:
+                    # Lines with assignments, function calls, etc.
+                    if re.search(r'\w+\s*=\s*\w+', line) or re.search(r'\w+\(.*\)', line):
+                        is_code_like = True
+                    # Lines with proper indentation and code-like structure
+                    elif re.match(r'^\s{2,}\w+', line):
+                        is_code_like = True
+            
+            if is_code_like or (stripped_line.startswith('#') and current_segment):  # Comments in context
+                current_segment.append(line)
+            else:
+                if current_segment and self._calculate_code_density(current_segment) > code_density_threshold:
+                    segments.append('\n'.join(current_segment))
+                current_segment = []
+        
+        # Don't forget the last segment
+        if current_segment and self._calculate_code_density(current_segment) > code_density_threshold:
+            segments.append('\n'.join(current_segment))
+        
+        # Return the longest/best segment
+        if segments:
+            best_segment = max(segments, key=lambda s: len(s) * self._calculate_code_density(s.split('\n')))
+            self.logger.debug(f"Heuristic extraction found {len(segments)} segments, using best one")
+            return best_segment.strip()
+        
+        return ""
+
+    def _calculate_code_density(self, lines: list) -> float:
+        """Calculate the ratio of code-like lines to total lines."""
+        if not lines:
+            return 0.0
+            
+        code_like_count = 0
+        non_empty_count = 0
+        
+        for line in lines:
+            stripped = line.strip()
+            if not stripped:
+                continue
+            non_empty_count += 1
+            
+            # Check if line looks like code
+            if (re.search(r'[=\(\)\[\]{};]', line) or  # Contains code symbols
+                line.strip().startswith('#') or  # Comment
+                re.search(r'^\s*(def|class|if|for|while|try|except|import|from)\s', line) or  # Python keywords
+                re.search(r'^\s*(function|var|let|const|if|for|while)\s', line)):  # JS keywords
+                code_like_count += 1
+        
+        return code_like_count / non_empty_count if non_empty_count > 0 else 0.0
+
+    def _retry_with_explicit_instruction(self, original_response: str) -> str:
+        """
+        Single retry with explicit instruction to provide fenced code block.
+        
+        This method is called when initial parsing fails and provides
+        a more specific instruction to the model.
+        """
+        retry_prompt = f"""The previous response did not contain a properly formatted code block.
+Please provide ONLY the code in a fenced code block format like this:
+
+```python
+# your code here
+```
+
+Original task context: {original_response[:200]}...
+
+Please respond with ONLY the code block, no explanations."""
+
+        try:
+            # Use the existing model to generate with explicit instruction
+            retry_response = self._generate_with_llama(retry_prompt)
+            self.logger.debug(f"Retry response length: {len(retry_response)} chars")
+            return retry_response
+        except Exception as e:
+            self.logger.error(f"Retry generation failed: {e}")
+            return ""
 
     def _analyze_for_next_action(self, task: Task, edited_code: str) -> dict:
         """

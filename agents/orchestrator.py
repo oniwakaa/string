@@ -37,28 +37,40 @@ class CodeGeneratorAgent(BaseAgent):
     """
     
     def __init__(self):
+        # Use environment variable to override generation model, fallback to SmolLM3 for reliability
+        generation_model = os.getenv("STRING_GENERATION_MODEL_NAME", "SmolLM3-3B-Q4_K_M")
         super().__init__(
-            name="Gemma3n_CodeGenerator",
+            name=f"CodeGenerator_{generation_model.replace('-', '_')}",
             role="code_generator",
-            model_name="gemma-3n-E4B-it"
+            model_name=generation_model
         )
         
-        # Gemma-specific configuration
-        self.max_context_length = 8192  # Gemma 3n context window
-        self.generation_config = {
-            'max_tokens': 1024,
-            'temperature': 0.3,
-            'top_p': 0.9,
-            'top_k': 40,
-            'repeat_penalty': 1.1,
-            'stop': ["<|endoftext|>", "<|im_end|>", "</code>"],
-        }
+        # Model-specific configuration based on which model is being used
+        if "SmolLM3" in generation_model:
+            self.max_context_length = 16384  # SmolLM3 context window
+            self.generation_config = {
+                'max_tokens': 512,
+                'temperature': 0.3,
+                'top_p': 0.9,
+                'stop': ["<|endoftext|>", "<|im_end|>", "</code>"],
+            }
+        else:
+            # Gemma or other models
+            self.max_context_length = 8192  # Default context window
+            self.generation_config = {
+                'max_tokens': 1024,
+                'temperature': 0.3,
+                'top_p': 0.9,
+                'top_k': 40,
+                'repeat_penalty': 1.1,
+                'stop': ["<|endoftext|>", "<|im_end|>", "</code>"],
+            }
         
-        # Memory management for M4 MacBook
+        # Memory management optimized for Apple Silicon
         self.llama_config = {
             'n_ctx': self.max_context_length,
             'n_batch': 512,
-            'n_gpu_layers': -1,  # Use all available GPU layers on M4
+            'n_gpu_layers': 20,  # Conservative GPU layers to avoid contention
             'use_mmap': True,  # Memory mapping for efficiency
             'use_mlock': False,  # Don't lock memory to allow swapping if needed
             'low_vram': True,  # Optimize for lower VRAM usage

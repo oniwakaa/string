@@ -1,0 +1,6 @@
+agents
+cli
+config
+models
+src
+string_ai_coding_assistant

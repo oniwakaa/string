@@ -26,6 +26,13 @@ import json
 import hashlib
 import tempfile
 
+# Import content sanitizer for cleaning model outputs
+try:
+    from string_ai_coding_assistant.backend.content_sanitizer import sanitize_content, is_content_clean
+    SANITIZER_AVAILABLE = True
+except ImportError:
+    SANITIZER_AVAILABLE = False
+
 
 class SecurityError(Exception):
     """Custom exception for security-related errors."""
@@ -49,6 +56,9 @@ class ToolboxConfig:
     
     MAX_FILE_SIZE = 10 * 1024 * 1024  # 10MB
     MAX_COMMAND_TIMEOUT = 30  # seconds
+    
+    # Content processing settings
+    SANITIZE_CONTENT = True  # Enable content sanitization by default
     
     # Command whitelist - only safe, non-destructive commands
     ALLOWED_COMMANDS = {
@@ -253,35 +263,45 @@ class SecureToolbox:
                 else:
                     raise SecurityError(f"File already exists and backup=False: {validated_path}")
             
+            # Sanitize content if enabled and available
+            final_content = content
+            if ToolboxConfig.SANITIZE_CONTENT and SANITIZER_AVAILABLE:
+                if not is_content_clean(content):
+                    final_content = sanitize_content(content, preserve_structure=True)
+                    self.logger.debug(f"Content sanitized: {len(content)} -> {len(final_content)} chars")
+                else:
+                    self.logger.debug("Content already clean, skipping sanitization")
+            
             # Validate content size
-            if len(content.encode('utf-8')) > ToolboxConfig.MAX_FILE_SIZE:
-                raise SecurityError(f"Content size exceeds limit: {len(content)} bytes")
+            if len(final_content.encode('utf-8')) > ToolboxConfig.MAX_FILE_SIZE:
+                raise SecurityError(f"Content size exceeds limit: {len(final_content)} bytes")
             
             # Create parent directories if they don't exist
             validated_path.parent.mkdir(parents=True, exist_ok=True)
             
             # Write content to file
             with open(validated_path, 'w', encoding='utf-8') as f:
-                f.write(content)
+                f.write(final_content)
             
             # Calculate file hash for integrity
-            file_hash = hashlib.sha256(content.encode('utf-8')).hexdigest()
+            file_hash = hashlib.sha256(final_content.encode('utf-8')).hexdigest()
             
             # Log successful operation
             self._log_operation(
                 operation="CREATE_FILE",
                 target=str(validated_path),
                 success=True,
-                details=f"Size: {len(content)} bytes, Hash: {file_hash[:16]}..."
+                details=f"Size: {len(final_content)} bytes, Hash: {file_hash[:16]}..."
             )
             
             return {
                 'success': True,
                 'path': str(validated_path),
-                'size': len(content),
+                'size': len(final_content),
                 'hash': file_hash,
                 'execution_time': (datetime.now() - operation_start).total_seconds(),
-                'backup_created': backup and validated_path.exists()
+                'backup_created': backup and validated_path.exists(),
+                'sanitized': ToolboxConfig.SANITIZE_CONTENT and SANITIZER_AVAILABLE and not is_content_clean(content)
             }
             
         except Exception as e:
