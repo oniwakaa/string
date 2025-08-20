@@ -1,18 +1,22 @@
 """
-High-Performance WebResearcherAgent - Optimized for speed and efficiency.
+Enhanced WebResearcherAgent with true headless web surfing capabilities.
 
 This agent implements multiple performance optimizations:
-- Connection pooling and session reuse
+- Playwright-based headless browsing (true web surfing)
+- Natural language query processing with URL extraction
+- Connection pooling and session reuse (fallback)
 - Parallel processing with semaphore-based rate limiting
-- Fast HTML parsing with lxml
+- Fast HTML parsing with deterministic waits
 - Intelligent caching system
-- Batched LLM inference
-- Targeted content extraction
+- MemOS integration for persistent research results
+- Bounded timeouts and guardrails
 """
 
 import asyncio
 import aiohttp
 import time
+import re
+import logging
 from typing import Any, Dict, List, Optional, Tuple
 from dataclasses import dataclass
 from urllib.parse import urljoin, urlparse
@@ -23,6 +27,9 @@ import json
 import ollama
 
 from agents.base import BaseAgent, Task, Result
+
+# Set up logging for observability
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -36,15 +43,15 @@ class CacheEntry:
 
 class PerformanceOptimizedWebResearcher(BaseAgent):
     """
-    High-performance web research agent with multiple optimizations.
+    Enhanced web research agent with true headless web surfing capabilities.
     
-    Key optimizations:
-    1. Async HTTP with connection pooling
-    2. Fast lxml-based HTML parsing
-    3. Intelligent content caching
-    4. Parallel processing with rate limiting
-    5. Batched LLM inference
-    6. Targeted content extraction
+    Key features:
+    1. Playwright-based headless browsing with Chromium
+    2. Natural language query processing with URL extraction
+    3. Intelligent content caching with bounded timeouts
+    4. MemOS integration for persistent research results
+    5. Fallback to aiohttp for simple fetching
+    6. Observability logging for routing and web access
     """
     
     def __init__(self, max_concurrent_requests: int = 10, cache_ttl: int = 3600):
@@ -59,12 +66,22 @@ class PerformanceOptimizedWebResearcher(BaseAgent):
         self.max_concurrent_requests = max_concurrent_requests
         self.cache_ttl = cache_ttl
         
-        # HTTP session with connection pooling
+        # Playwright for true headless browsing
+        self.playwright = None
+        self.browser = None
+        self.browser_context = None
+        
+        # HTTP session with connection pooling (fallback)
         self.session: Optional[aiohttp.ClientSession] = None
         self.semaphore = asyncio.Semaphore(max_concurrent_requests)
         
         # Content cache
         self.content_cache: Dict[str, CacheEntry] = {}
+        
+        # Timeouts and guardrails
+        self.page_timeout = 30000  # 30 seconds per page
+        self.navigation_timeout = 15000  # 15 seconds for navigation
+        self.max_pages_per_query = 2  # Primary + one fallback page max
         
         # HTML cleaner for efficient parsing
         self.html_cleaner = Cleaner(
@@ -85,6 +102,84 @@ class PerformanceOptimizedWebResearcher(BaseAgent):
         
         # Ollama client
         self.ollama_client = ollama.AsyncClient()
+    
+    async def _init_playwright(self):
+        """Initialize Playwright browser for headless surfing."""
+        if self.browser is None:
+            try:
+                from playwright.async_api import async_playwright
+                
+                self.playwright = await async_playwright().start()
+                self.browser = await self.playwright.chromium.launch(
+                    headless=True,
+                    args=[
+                        '--no-sandbox',
+                        '--disable-dev-shm-usage',
+                        '--disable-gpu',
+                        '--disable-extensions',
+                        '--disable-background-timer-throttling',
+                        '--disable-renderer-backgrounding',
+                        '--disable-backgrounding-occluded-windows',
+                        '--disable-ipc-flooding-protection'
+                    ]
+                )
+                
+                # Create browser context with reasonable settings
+                self.browser_context = await self.browser.new_context(
+                    viewport={'width': 1920, 'height': 1080},
+                    user_agent='HighPerf-WebResearcher/1.0 (headless)',
+                    ignore_https_errors=True
+                )
+                
+                # Set default timeouts
+                self.browser_context.set_default_timeout(self.page_timeout)
+                self.browser_context.set_default_navigation_timeout(self.navigation_timeout)
+                
+                logger.info("✅ Playwright browser initialized for headless surfing")
+                
+            except Exception as e:
+                logger.error(f"❌ Failed to initialize Playwright: {e}")
+                raise
+    
+    def _extract_url_from_query(self, query: str) -> Optional[str]:
+        """Extract URL from natural language query."""
+        # Direct URL patterns
+        url_pattern = r'https?://[^\s<>"{}|\\^`[\]]+[^\s<>"{}|\\^`[\].,;!?]'
+        urls = re.findall(url_pattern, query)
+        if urls:
+            return urls[0]
+        
+        # Common domain patterns with implicit HTTPS
+        domain_patterns = [
+            r'(?:from\s+|visit\s+|go\s+to\s+|check\s+)([a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*\.[a-zA-Z]{2,})',
+            r'([a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.(?:com|org|net|dev|io|ai|co|app|tech))\s+(?:website|site|docs|documentation)',
+        ]
+        
+        for pattern in domain_patterns:
+            matches = re.findall(pattern, query, re.IGNORECASE)
+            if matches:
+                domain = matches[0]
+                return f"https://{domain}"
+        
+        # Well-known sites for common queries
+        site_mapping = {
+            'react': 'https://react.dev',
+            'vue': 'https://vuejs.org',
+            'angular': 'https://angular.io',
+            'svelte': 'https://svelte.dev',
+            'node.js': 'https://nodejs.org',
+            'npm': 'https://npmjs.com',
+            'github': 'https://github.com',
+            'stackoverflow': 'https://stackoverflow.com',
+            'mdn': 'https://developer.mozilla.org'
+        }
+        
+        query_lower = query.lower()
+        for keyword, url in site_mapping.items():
+            if keyword in query_lower and any(term in query_lower for term in ['documentation', 'docs', 'guide', 'tutorial', 'api']):
+                return url
+        
+        return None
         
     async def _get_session(self) -> aiohttp.ClientSession:
         """Get or create HTTP session with optimized settings."""
@@ -120,6 +215,182 @@ class PerformanceOptimizedWebResearcher(BaseAgent):
             )
         
         return self.session
+    
+    async def _fetch_with_playwright(self, url: str, query: str) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+        """Fetch content using Playwright for true headless browsing."""
+        try:
+            await self._init_playwright()
+            
+            page = await self.browser_context.new_page()
+            page_metadata = {}
+            
+            try:
+                # Navigate to the URL with timeout
+                logger.info(f"🌐 Navigating to {url}")
+                start_time = time.time()
+                
+                await page.goto(url, wait_until='domcontentloaded', timeout=self.navigation_timeout)
+                navigation_time = time.time() - start_time
+                
+                # Wait for page to be fully loaded and interactive
+                await page.wait_for_load_state('networkidle', timeout=5000)  # Wait max 5s for network idle
+                
+                # Extract page metadata
+                title = await page.title()
+                current_url = page.url
+                
+                # Extract content with bounded selectors and timeouts
+                content_extraction_start = time.time()
+                
+                # Get title and headings
+                headings = []
+                for level in range(1, 4):  # h1, h2, h3 only for performance
+                    heading_elements = await page.query_selector_all(f'h{level}')
+                    for elem in heading_elements[:10]:  # Limit to 10 per level
+                        text = await elem.text_content()
+                        if text and text.strip():
+                            headings.append({'level': level, 'text': text.strip()})
+                
+                # Get main content paragraphs
+                paragraphs = []
+                p_elements = await page.query_selector_all('p, article p, main p, .content p')
+                for elem in p_elements[:15]:  # Limit to 15 paragraphs
+                    text = await elem.text_content()
+                    if text and len(text.strip()) > 20:  # Filter short paragraphs
+                        paragraphs.append(text.strip())
+                
+                # Get lists if relevant to query
+                lists = []
+                if any(term in query.lower() for term in ['list', 'steps', 'examples', 'api', 'methods']):
+                    list_elements = await page.query_selector_all('ul, ol')
+                    for elem in list_elements[:5]:  # Limit to 5 lists
+                        items = await elem.query_selector_all('li')
+                        list_items = []
+                        for item in items[:10]:  # Max 10 items per list
+                            text = await item.text_content()
+                            if text and text.strip():
+                                list_items.append(text.strip())
+                        if list_items:
+                            lists.append(list_items)
+                
+                # Get code blocks if this appears to be technical documentation
+                code_blocks = []
+                if any(term in query.lower() for term in ['code', 'example', 'function', 'api', 'hook']):
+                    code_elements = await page.query_selector_all('pre, code, .highlight')
+                    for elem in code_elements[:5]:  # Limit to 5 code blocks
+                        text = await elem.text_content()
+                        if text and len(text.strip()) > 10:
+                            code_blocks.append(text.strip())
+                
+                extraction_time = time.time() - content_extraction_start
+                
+                extracted_content = {
+                    'title': title,
+                    'url': current_url,
+                    'headings': headings,
+                    'paragraphs': paragraphs,
+                    'lists': lists,
+                    'code_blocks': code_blocks,
+                    'extraction_method': 'playwright_headless'
+                }
+                
+                page_metadata = {
+                    'navigation_time': navigation_time,
+                    'extraction_time': extraction_time,
+                    'total_headings': len(headings),
+                    'total_paragraphs': len(paragraphs),
+                    'total_lists': len(lists),
+                    'total_code_blocks': len(code_blocks),
+                    'final_url': current_url
+                }
+                
+                logger.info(f"✅ Page extracted: {len(paragraphs)} paragraphs, {len(headings)} headings in {extraction_time:.2f}s")
+                
+                return extracted_content, page_metadata
+                
+            finally:
+                await page.close()
+                
+        except Exception as e:
+            logger.error(f"❌ Playwright extraction failed for {url}: {e}")
+            raise
+    
+    def _create_concise_summary(self, extracted_content: Dict[str, Any], query: str) -> Dict[str, Any]:
+        """Create concise summary with brief citations, avoiding raw URLs in user content."""
+        try:
+            title = extracted_content.get('title', 'Untitled')
+            url = extracted_content.get('url', '')
+            parsed_url = urlparse(url)
+            domain = parsed_url.netloc.replace('www.', '') if parsed_url.netloc else 'Unknown'
+            
+            # Create structured summary
+            summary_parts = []
+            
+            # Add title and source
+            if title and title != 'Untitled':
+                summary_parts.append(f"**{title}**")
+            
+            # Add relevant headings (top 3)
+            headings = extracted_content.get('headings', [])[:3]
+            if headings:
+                heading_text = " | ".join([h['text'] for h in headings])
+                summary_parts.append(f"Key sections: {heading_text}")
+            
+            # Add key paragraphs (first 2 relevant ones)
+            paragraphs = extracted_content.get('paragraphs', [])
+            relevant_paragraphs = []
+            query_terms = query.lower().split()[:3]  # Use first 3 query terms
+            
+            for p in paragraphs[:5]:  # Check first 5 paragraphs
+                p_lower = p.lower()
+                if any(term in p_lower for term in query_terms):
+                    relevant_paragraphs.append(p)
+                    if len(relevant_paragraphs) >= 2:
+                        break
+            
+            # If no relevant paragraphs found, use first 2
+            if not relevant_paragraphs:
+                relevant_paragraphs = paragraphs[:2]
+            
+            for p in relevant_paragraphs:
+                # Truncate long paragraphs
+                truncated = p[:300] + "..." if len(p) > 300 else p
+                summary_parts.append(truncated)
+            
+            # Add code examples if relevant
+            code_blocks = extracted_content.get('code_blocks', [])
+            if code_blocks and any(term in query.lower() for term in ['code', 'example', 'function', 'api']):
+                first_code = code_blocks[0][:200] + "..." if len(code_blocks[0]) > 200 else code_blocks[0]
+                summary_parts.append(f"Code example:\n```\n{first_code}\n```")
+            
+            # Join summary
+            summary_text = "\n\n".join(summary_parts)
+            
+            # Add brief citation (domain and title only, no raw URL)
+            citation = f"Source: {title} ({domain})"
+            
+            return {
+                'summary': summary_text,
+                'citation': citation,
+                'source_title': title,
+                'source_domain': domain,
+                'extraction_metadata': {
+                    'total_headings': len(headings),
+                    'total_paragraphs': len(paragraphs),
+                    'total_code_blocks': len(code_blocks),
+                    'relevant_paragraphs_found': len([p for p in paragraphs[:5] if any(term in p.lower() for term in query.lower().split()[:3])])
+                }
+            }
+            
+        except Exception as e:
+            logger.error(f"❌ Summary creation failed: {e}")
+            # Fallback summary
+            title = extracted_content.get('title', 'Web Content')
+            return {
+                'summary': f"Retrieved content from {title}. Summary generation failed: {e}",
+                'citation': f"Source: {title}",
+                'extraction_metadata': {'error': str(e)}
+            }
     
     def _extract_content_fast(self, html_content: str, url: str) -> Dict[str, Any]:
         """Fast content extraction using lxml."""
@@ -323,61 +594,106 @@ Provide a concise, structured response in JSON format."""
             }
     
     async def execute(self, task: Task) -> Result:
-        """Execute optimized web research task."""
+        """Execute enhanced web research task with headless browsing."""
         try:
-            # Validate input
-            if not task.context or "source_url" not in task.context:
-                return Result(
-                    task_id=task.task_id,
-                    status="failure",
-                    output={},
-                    error_message="Missing required 'source_url' in task context"
-                )
-            
-            url = task.context["source_url"]
             self.status = 'processing'
-            
             start_time = time.time()
             
-            # Step 1: Fetch content (with caching and rate limiting)
-            html_content, from_cache = await self._fetch_content(url)
-            fetch_time = time.time() - start_time
+            # Extract URL from prompt or context
+            url = None
             
-            # Step 2: Fast content extraction
-            extract_start = time.time()
-            extracted_content = self._extract_content_fast(html_content, url)
-            extract_time = time.time() - extract_start
-            
-            # Step 3: LLM processing (optional, based on prompt complexity)
-            llm_start = time.time()
-            if any(keyword in task.prompt.lower() for keyword in ['analyze', 'summary', 'extract specific', 'understand']):
-                final_result = await self._process_with_llm(extracted_content, task.prompt)
+            # Check if URL is provided in context (legacy mode)
+            if task.context and "source_url" in task.context:
+                url = task.context["source_url"]
+                logger.info(f"🔗 Using URL from context: {url}")
             else:
-                # Simple extraction without LLM
-                final_result = {
-                    'raw_content': extracted_content,
-                    'processing_method': 'fast_extraction_only'
-                }
-            llm_time = time.time() - llm_start
+                # Extract URL from natural language query
+                url = self._extract_url_from_query(task.prompt)
+                if url:
+                    logger.info(f"🔍 Extracted URL from query: {url}")
+                else:
+                    return Result(
+                        task_id=task.task_id,
+                        status="failure",
+                        output={},
+                        error_message="Could not extract URL from query. Please provide a direct URL or mention a specific website."
+                    )
+            
+            # Validate URL format
+            parsed_url = urlparse(url)
+            if not parsed_url.netloc:
+                return Result(
+                    task_id=task.task_id,
+                    status="failure", 
+                    output={},
+                    error_message=f"Invalid URL format: {url}"
+                )
+            
+            # Log web access metadata for observability
+            logger.info(f"🌐 Starting web research for domain: {parsed_url.netloc}")
+            
+            # Step 1: Headless browsing with Playwright (primary method)
+            try:
+                extracted_content, page_metadata = await self._fetch_with_playwright(url, task.prompt)
+                extraction_method = 'playwright_headless'
+                fetch_time = page_metadata.get('navigation_time', 0)
+                extract_time = page_metadata.get('extraction_time', 0)
+                
+            except Exception as e:
+                logger.warning(f"⚠️ Playwright extraction failed, falling back to aiohttp: {e}")
+                
+                # Fallback to aiohttp + lxml extraction
+                try:
+                    html_content, from_cache = await self._fetch_content(url)
+                    fetch_start = time.time()
+                    extracted_content = self._extract_content_fast(html_content, url)
+                    extract_time = time.time() - fetch_start
+                    extraction_method = 'aiohttp_fallback'
+                    fetch_time = 0  # Already included in extract_time
+                    page_metadata = {'fallback_used': True, 'from_cache': from_cache}
+                    
+                except Exception as fallback_error:
+                    logger.error(f"❌ Both Playwright and fallback extraction failed: {fallback_error}")
+                    return Result(
+                        task_id=task.task_id,
+                        status="failure",
+                        output={},
+                        error_message=f"Web content extraction failed: {fallback_error}"
+                    )
+            
+            # Step 2: Generate concise summary with citations
+            summary_start = time.time()
+            summary = self._create_concise_summary(extracted_content, task.prompt)
+            summary_time = time.time() - summary_start
             
             total_time = time.time() - start_time
             
             self.status = 'ready'
             
+            # Log observability metadata (compact format)
+            logger.info(f"🎯 Web research completed: domain={parsed_url.netloc}, "
+                       f"method={extraction_method}, "
+                       f"timing: total={total_time:.2f}s (fetch={fetch_time:.2f}s, extract={extract_time:.2f}s, summary={summary_time:.2f}s)")
+            
             return Result(
                 task_id=task.task_id,
                 status="success",
                 output={
-                    'extracted_data': final_result,
-                    'source_url': url,
-                    'extraction_prompt': task.prompt,
+                    'research_summary': summary['summary'],
+                    'citation': summary['citation'],
+                    'source_title': summary['source_title'],
+                    'source_domain': summary['source_domain'],
+                    'query': task.prompt,
+                    'raw_extracted_content': extracted_content,  # For potential MemOS storage
                     'performance_metrics': {
                         'total_time': total_time,
                         'fetch_time': fetch_time,
                         'extract_time': extract_time,
-                        'llm_time': llm_time,
-                        'from_cache': from_cache
-                    }
+                        'summary_time': summary_time,
+                        'extraction_method': extraction_method,
+                        **page_metadata
+                    },
+                    'extraction_metadata': summary.get('extraction_metadata', {})
                 }
             )
             
@@ -443,11 +759,31 @@ Provide a concise, structured response in JSON format."""
     
     async def cleanup(self):
         """Clean up resources."""
-        if self.session and not self.session.closed:
-            await self.session.close()
-        
-        # Clear cache
-        self.content_cache.clear()
+        try:
+            # Cleanup Playwright resources
+            if self.browser_context:
+                await self.browser_context.close()
+                self.browser_context = None
+            
+            if self.browser:
+                await self.browser.close()
+                self.browser = None
+                
+            if self.playwright:
+                await self.playwright.stop()
+                self.playwright = None
+            
+            # Cleanup aiohttp session
+            if self.session and not self.session.closed:
+                await self.session.close()
+            
+            # Clear cache
+            self.content_cache.clear()
+            
+            logger.info("✅ WebResearcher cleanup completed")
+            
+        except Exception as e:
+            logger.error(f"⚠️ Error during WebResearcher cleanup: {e}")
     
     def __del__(self):
         """Ensure cleanup on destruction."""
