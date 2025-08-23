@@ -404,6 +404,47 @@ class ModelManager:
                 for name in self.loaded_models.keys()
             }
 
+    def get_model_info(self, model_name: str) -> Dict[str, Any]:
+        """
+        Get information about a specific model (loaded or configured).
+        
+        Args:
+            model_name: Name of the model to get info for
+            
+        Returns:
+            Dict containing model information including loader type, path, etc.
+            
+        Raises:
+            ValueError: If model not found in configuration
+        """
+        # Normalize model name
+        if model_name not in self.config.get("models", {}):
+            model_name = self._normalize_model_key(model_name)
+        
+        if model_name not in self.config.get("models", {}):
+            raise ValueError(f"Model '{model_name}' not found in configuration")
+        
+        model_config = self.config["models"][model_name]
+        
+        # Base info from configuration
+        info = {
+            "name": model_name,
+            "loader": model_config.get("loader", "unknown"),
+            "path": model_config.get("path", ""),
+            "purpose": model_config.get("purpose", "general"),
+            "is_loaded": model_name in self.loaded_models
+        }
+        
+        # Add runtime metadata if loaded
+        if model_name in self.model_metadata:
+            metadata = self.model_metadata[model_name]
+            info.update({
+                "loaded_at": metadata.get("loaded_at", 0),
+                "last_used": self.last_used.get(model_name, 0)
+            })
+        
+        return info
+
     def get_memory_stats(self) -> Dict[str, Any]:
         """Compatibility shim used by health/status callers.
         Returns lightweight statistics about loaded models.

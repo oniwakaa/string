@@ -534,13 +534,15 @@ class CodebaseExpertAgent(BaseAgent):
             if self.http_client is None:
                 self.lazy_load_model()
             
-            # Extract user_id from task context or use default
+            # Extract user_id and project_id from task context or use defaults
             user_id = task.context.get('user_id', 'default_user')
+            project_id = task.context.get('project_id', 'default')
             
             # Prepare the payload for the /chat endpoint
             chat_payload = {
                 "query": task.prompt,
                 "user_id": user_id,
+                "project_id": project_id,  # Critical: Include project_id for scoped retrieval
                 "include_memory": True,  # Enable MemOS memory and RAG features
                 "memory_top_k": 5  # Number of relevant memories to retrieve
             }

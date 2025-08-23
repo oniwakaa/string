@@ -105,7 +105,7 @@ class BaseAgent(ABC):
         try:
             # Check if model is GGUF (llama-cpp) - tokenizer is integrated
             model_info = model_manager.get_model_info(self.model_name)
-            if model_info.get('loader') == 'llama-cpp':
+            if model_info.get('loader') in ['llama-cpp', 'gguf']:
                 return self.model  # GGUF models have integrated tokenizers
             
             # For HuggingFace models, load separate tokenizer
@@ -178,7 +178,7 @@ class BaseAgent(ABC):
             model_info = model_manager.get_model_info(self.model_name)
             loader_type = model_info.get('loader', 'unknown')
             
-            if loader_type == 'llama-cpp':
+            if loader_type in ['llama-cpp', 'gguf']:
                 # GGUF model using llama-cpp-python
                 response = self.model(
                     prompt,

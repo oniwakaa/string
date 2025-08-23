@@ -1,0 +1,33 @@
+# WebResearch MemOS Persistence Configuration
+# 
+# This file controls WebResearchAgent memory persistence behavior
+# Changes require service restart to take effect
+
+# Core feature flags
+persistence:
+  enabled: true                    # Master switch for research persistence
+  dry_run_mode: false             # Set to true for validation without writes
+  auto_user_registration: true    # Auto-register users following MemOS patterns
+
+# Authorization and access control  
+authorization:
+  enforce_preflight_checks: true  # Validate write capability before persistence
+  least_privilege_mode: true      # Grant minimum required permissions only
+  
+  # User role for auto-registered users (USER = least privilege)
+  default_user_role: "USER"
+  
+  # Cube access scope (project-specific cubes only)
+  cube_access_scope: "project_only"
+
+# Error handling and observability
+logging:
+  detailed_error_taxonomy: true   # Differentiate AuthN/AuthZ/Schema/Write errors
+  structured_metadata: true       # Include cube, domain, timing in logs
+  
+# Rollback configuration
+rollback:
+  # To disable persistence: set persistence.enabled = false
+  # To remove user access: use MemOS user_manager.remove_user_from_cube()
+  # To audit changes: check backend.log for persistence entries
+  audit_trail: true

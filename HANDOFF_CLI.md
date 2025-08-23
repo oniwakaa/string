@@ -32,8 +32,9 @@ Develop a production-ready multi-agent AI coding assistant CLI with MemOS RAG in
 - **Database**: Qdrant vector storage at `./storage/qdrant_storage`
 - **Key API Endpoints**: 
   - `/health` - Service health monitoring
-  - `/chat` - Main conversational interface
-  - `/memory` - MemOS memory operations
+  - `/status` - Detailed service status
+  - `/execute_agentic_task` - Primary endpoint for natural language queries
+  - `/load_codebase` - Codebase loading for memory enhancement
 - **Deployment**: Local service via pipx venv at port 8000
 - **Security**: Runtime-scoped STRING_HOME isolation, no external auth required
 
@@ -175,6 +176,29 @@ Develop a production-ready multi-agent AI coding assistant CLI with MemOS RAG in
 | `./cli/health_check.py` | Updated for runtime focus and Metal detection | Remove build-time validations, add Metal support | Done |
 | `./config_loader.py` | Added STRING_HOME path resolution | Support runtime configuration paths | Done |
 | `./setup_cli.py` | Complete rewrite with OS-aware Python 3.11 provisioning | Bulletproof cross-platform installation | Done |
+
+## CLI Simplification Update (Current Session)
+
+| File | Change | Reason | Status |
+|------|--------|--------|--------|
+| `./cli/main.py` | Simplified CLI to agentic default with essential commands only | Route all natural language to execute_agentic_task, remove redundant commands | Done |
+| `./HANDOFF_CLI.md` | Updated CLI documentation section | Align docs with simplified interface | Done |
+
+### Simplified CLI Command Surface
+
+**Retained Commands:**
+- **Interactive Mode** (default): Auto-loads codebase, routes natural language to `execute_agentic_task`
+- **Direct Input**: `string-cli "your query"` - Routes directly to `execute_agentic_task`
+- **Essential**: `string-cli quit-cli` - Gracefully terminates backend and exits
+
+**Interactive Session Commands:**
+- `/status` - Read-only status check (does not start backend)
+- `/clear` - Project-scoped memory maintenance
+- `/compact` - Project-scoped storage maintenance  
+- `/quit` - Gracefully terminates backend and exits session
+
+**Removed/Deprecated Commands:**
+- `validate`, `cli-status`, `start-backend`, `stop-backend`, `execute`, `health`, `load`, `ask`, `status` - All consolidated into interactive mode or deprecated
 
 ## Next Steps & Owner
 

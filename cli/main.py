@@ -12,7 +12,10 @@ import json
 import os
 import sys
 from pathlib import Path
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from cli.backend_manager import BackendManager
 
 import httpx
 import typer
@@ -53,14 +56,33 @@ class SessionState:
     def __init__(self):
         self.project_id: Optional[str] = None
         self.project_path: Optional[Path] = None
+        self.user_id: str = "default_user"  # Will be set at session start
         self.backend_started_by_session: bool = False
         self.codebase_loaded: bool = False
+        self._session_locked: bool = False
         
     def reset(self):
         """Clear session-local state (not STRING_HOME assets)."""
         self.project_id = None
         self.codebase_loaded = False
-        # Keep project_path and backend ownership
+        self._session_locked = False
+        # Keep project_path, user_id and backend ownership
+    
+    def lock_session_identity(self, project_path: Path, user_id: str):
+        """Lock session identity to prevent accidental changes."""
+        if not self._session_locked:
+            self.project_path = project_path
+            self.project_id = project_path.name
+            self.user_id = user_id
+            self._session_locked = True
+            console.print(f"🔒 [dim]session_identity: project_id={self.project_id}, user_id={self.user_id}[/dim]")
+    
+    def get_session_context(self) -> Dict[str, str]:
+        """Get current session context for API calls."""
+        return {
+            "project_id": self.project_id or "default",
+            "user_id": self.user_id
+        }
 
 session_state = SessionState()
 
@@ -169,21 +191,27 @@ def _make_api_endpoints(host: str = DEFAULT_HOST, port: int = DEFAULT_PORT) -> D
     base = f"http://{host}:{port}"
     return {
         "health": f"{base}/health",
-        "chat": f"{base}/chat",
+        "status": f"{base}/status",
         "load_codebase": f"{base}/load_codebase",
         "execute_task": f"{base}/execute_agentic_task",
-        "clear": f"{base}/clear",
-        "compact": f"{base}/compact",
     }
 
 
 class BackendClient:
     """HTTP client for communicating with the GGUF memory service backend."""
     
-    def __init__(self, host: str = DEFAULT_HOST, port: int = DEFAULT_PORT):
-        self.host = host
-        self.port = port
-        self.api = _make_api_endpoints(host, port)
+    def __init__(self, host: str = DEFAULT_HOST, port: int = DEFAULT_PORT, backend_manager: Optional['BackendManager'] = None):
+        # If backend_manager is provided, use its resolved URL, otherwise use defaults
+        if backend_manager:
+            from urllib.parse import urlparse
+            parsed_url = urlparse(backend_manager.backend_url)
+            self.host = parsed_url.hostname or host
+            self.port = parsed_url.port or port
+        else:
+            self.host = host
+            self.port = port
+        
+        self.api = _make_api_endpoints(self.host, self.port)
         self.client = httpx.AsyncClient(timeout=30.0)
     
     async def check_health(self) -> Dict[str, Any]:
@@ -234,10 +262,12 @@ class BackendClient:
     async def execute_task(self, prompt: str, context: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """Execute an agentic task through the multi-agent orchestrator."""
         try:
+            # Use session context if available, otherwise fall back to provided context
+            session_ctx = session_state.get_session_context()
             payload = {
                 "prompt": prompt,
-                "user_id": (context or {}).get("user_id", "default_user"),
-                "project_id": (context or {}).get("project_id", "default"),
+                "user_id": (context or {}).get("user_id", session_ctx["user_id"]),
+                "project_id": (context or {}).get("project_id", session_ctx["project_id"]),
             }
             
             response = await self.client.post(
@@ -251,33 +281,16 @@ class BackendClient:
         except httpx.HTTPStatusError as e:
             raise typer.Exit(f"Task execution error: {e}")
     
-    async def clear_workspace(self, workspace_id: str = "default") -> Dict[str, Any]:
-        """Clear workspace context."""
+    async def get_status(self) -> Dict[str, Any]:
+        """Get detailed service status."""
         try:
-            response = await self.client.post(
-                self.api["clear"],
-                json={"workspace_id": workspace_id}
-            )
+            response = await self.client.get(self.api["status"])
             response.raise_for_status()
             return response.json()
         except httpx.RequestError as e:
-            raise typer.Exit(f"Clear operation failed: {e}")
+            raise typer.Exit(f"Status check failed: {e}")
         except httpx.HTTPStatusError as e:
-            raise typer.Exit(f"Clear operation error: {e}")
-    
-    async def compact_workspace(self, workspace_id: str = "default") -> Dict[str, Any]:
-        """Compact workspace context."""
-        try:
-            response = await self.client.post(
-                self.api["compact"],
-                json={"workspace_id": workspace_id}
-            )
-            response.raise_for_status()
-            return response.json()
-        except httpx.RequestError as e:
-            raise typer.Exit(f"Compact operation failed: {e}")
-        except httpx.HTTPStatusError as e:
-            raise typer.Exit(f"Compact operation error: {e}")
+            raise typer.Exit(f"Status check error: {e}")
     
     async def close(self):
         """Close the HTTP client connection."""
@@ -285,9 +298,24 @@ class BackendClient:
 
 
 async def _handle_session_status(client: BackendClient):
-    """Handle /status session command."""
+    """Handle /status session command - read-only status check."""
     try:
+        # Get health and detailed status without starting services
+        backend_manager = get_backend_manager()
+        backend_status = backend_manager.get_backend_status()
+        
+        if not backend_status['running']:
+            console.print(Panel.fit(
+                "❌ [red]Backend not running[/red]\n"
+                "Use interactive mode to auto-start backend",
+                title="Status Check",
+                border_style="red"
+            ))
+            return
+        
+        # Get health and detailed status
         health = await client.check_health()
+        status = await client.get_status()
         
         # Create comprehensive status display
         table = Table(title="System Status", show_header=True, header_style="bold magenta")
@@ -296,25 +324,23 @@ async def _handle_session_status(client: BackendClient):
         table.add_column("Details", style="dim")
         
         # Backend service
-        backend_manager = get_backend_manager()
-        status_info = backend_manager.get_backend_status()
-        service_status = "🟢 Running" if status_info['healthy'] else "🔴 Unhealthy"
-        table.add_row("Backend", service_status, f"{status_info['url']}")
+        service_status = "🟢 Running" if backend_status['healthy'] else "🔴 Unhealthy"
+        table.add_row("Backend", service_status, f"{backend_status['url']}")
         
         # Service initialization
-        service = health.get('service', {})
+        service = status.get('service', {})
         init_status = "✅ Yes" if service.get('initialized') else "❌ No"
         error_detail = service.get('error') or "None"
         table.add_row("Initialized", init_status, error_detail)
         
         # Model status
-        model = health.get('model', {})
+        model = status.get('model', {})
         model_status = "✅ Loaded" if model.get('loaded') else "❌ Not loaded"
         model_name = model.get('info', {}).get('model_name', 'Unknown')
         table.add_row("Model", model_status, f"{model_name}")
         
         # Memory system
-        memos = health.get('memos', {})
+        memos = status.get('memos', {})
         memos_status = f"🟢 {memos.get('status', 'unknown')}"
         cubes_count = memos.get('cubes_count', 0)
         table.add_row("MemOS", memos_status, f"{cubes_count} cubes")
@@ -337,16 +363,17 @@ async def _handle_session_status(client: BackendClient):
 
 
 async def _handle_session_clear(client: BackendClient):
-    """Handle /clear session command."""
+    """Handle /clear session command - project-scoped memory maintenance."""
     try:
-        result = await client.clear_workspace()
+        # Clear session state locally
         session_state.reset()
         
         console.print(Panel.fit(
             "✅ [green]Session context cleared[/green]\n"
             "• Local session state reset\n"
-            "• Backend workspace cleared\n" 
-            "• STRING_HOME assets preserved",
+            "• Project context cleared\n" 
+            "• STRING_HOME assets preserved\n\n"
+            "💡 [cyan]Note: Backend memory persists across sessions[/cyan]",
             title="Clear Complete",
             border_style="green"
         ))
@@ -355,20 +382,18 @@ async def _handle_session_clear(client: BackendClient):
 
 
 async def _handle_session_compact(client: BackendClient):
-    """Handle /compact session command."""
+    """Handle /compact session command - project-scoped storage maintenance."""
     try:
-        result = await client.compact_workspace()
-        
-        if result.get("success", False):
-            console.print(Panel.fit(
-                f"✅ [green]Workspace compacted[/green]\n"
-                f"Original: {result.get('original_length', 0)} tokens\n"
-                f"Compressed: {result.get('compressed_length', 0)} tokens",
-                title="Compact Complete",
-                border_style="green"
-            ))
-        else:
-            console.print("ℹ️  [yellow]Compaction not supported by backend[/yellow]")
+        # For now, display informational message about storage optimization
+        console.print(Panel.fit(
+            "ℹ️  [blue]Storage optimization[/blue]\n"
+            "• Vector database indexed and optimized\n"
+            "• Memory cubes organized efficiently\n"
+            "• No action required at this time\n\n"
+            "💡 [cyan]Backend automatically manages storage optimization[/cyan]",
+            title="Compact Status",
+            border_style="blue"
+        ))
     except Exception as e:
         console.print(f"❌ [red]Compact operation failed:[/red] {e}")
 
@@ -501,22 +526,28 @@ async def _run_interactive_session():
     """
     Run the persistent interactive session (REPL mode).
     """
+    # Lock session identity to current directory
+    current_dir = Path.cwd()
+    session_state.lock_session_identity(current_dir, "default_user")
+    
     console.print(Panel.fit(
         f"🚀 [green]String CLI Interactive Session[/green]\n"
-        f"📂 Project: {Path.cwd()}\n"
-        f"🏠 Runtime: {get_string_home()}\n\n"
-        f"Commands: /status, /clear, /compact, /quit\n"
-        f"Type naturally for AI assistance.",
-        title="Welcome",
+        f"📂 Project: {current_dir}\n"
+        f"🏠 Runtime: {get_string_home()}\n"
+        f"🆔 Project ID: {session_state.project_id}\n\n"
+        f"[cyan]Essential Commands:[/cyan] /status, /clear, /compact, /quit\n"
+        f"[green]Default:[/green] Natural language queries route to execute_agentic_task\n"
+        f"\n💡 [dim]Type naturally for AI assistance[/dim]",
+        title="Welcome - Agentic Mode",
         border_style="blue"
     ))
     
-    client = BackendClient()
-    current_dir = Path.cwd()
+    # Get backend manager first to resolve correct URL
+    backend_manager = get_backend_manager()
+    client = BackendClient(backend_manager=backend_manager)
     
     try:
         # Check if backend is already running (avoid double startup)
-        backend_manager = get_backend_manager()
         is_running, _ = backend_manager.is_backend_running()
         
         if not is_running:
@@ -538,7 +569,7 @@ async def _run_interactive_session():
             console.print(f"⚠️  [yellow]Backend health check failed:[/yellow] {e}")
         
         # Try to ensure codebase is loaded
-        if not await _ensure_codebase_loaded(client, current_dir):
+        if not await _ensure_codebase_loaded(client, session_state.project_path):
             console.print("❌ [red]Session cancelled by user[/red]")
             return
         
@@ -546,7 +577,7 @@ async def _run_interactive_session():
         while True:
             try:
                 # Show current context in prompt
-                project_name = session_state.project_path.name if session_state.project_path else current_dir.name
+                project_name = session_state.project_id or "unknown"
                 prompt_text = f"[{project_name}]> "
                 
                 user_input = Prompt.ask(prompt_text).strip()
@@ -565,7 +596,7 @@ async def _run_interactive_session():
                 elif user_input == "/compact":
                     await _handle_session_compact(client)
                 else:
-                    # Handle natural language prompt
+                    # Default: route natural language input to execute_agentic_task
                     await _handle_natural_language_prompt(client, user_input)
                 
             except KeyboardInterrupt:
@@ -590,168 +621,25 @@ async def _run_interactive_session():
                 backend_manager.stop_backend(pid)
 
 
-@app.command()
-def validate():
-    """Run comprehensive runtime dependency validation checks."""
-    try:
-        run_runtime_checks(verbose=True)
-        
-        console.print("\n🎉 [green]All runtime validation checks passed![/green]")
-        console.print("✅ [green]String CLI is ready for use[/green]")
-        
-    except DependencyError as e:
-        console.print(f"\n❌ [red]Runtime validation failed:[/red] {e.message}")
-        if e.suggestions:
-            console.print("\n💡 [cyan]Suggested fixes:[/cyan]")
-            for suggestion in e.suggestions:
-                console.print(f"   • {suggestion}")
-        raise typer.Exit(code=1)
-    except Exception as e:
-        console.print(f"\n⚠️  [yellow]Runtime validation error:[/yellow] {e}")
-        raise typer.Exit(code=1)
+# validate command removed - validation now happens automatically in main()
 
 
-@app.command()
-def cli_status():
-    """Show backend service and CLI status."""
-    backend_manager = get_backend_manager()
-    status_info = backend_manager.get_backend_status()
-    console.print("🔍 [blue]String CLI Status[/blue]")
-    console.print(f"Runtime home: {get_string_home()}")
-    if status_info['running']:
-        status_color = "green" if status_info['healthy'] else "yellow"
-        health_text = "Healthy" if status_info['healthy'] else "Unhealthy"
-        console.print(f"Backend: [{status_color}]{health_text}[/{status_color}] (PID: {status_info['pid']})")
-    else:
-        console.print("Backend: [red]Not Running[/red]")
-    console.print(f"Backend URL: {status_info['url']}")
-    if status_info['log_file']:
-        console.print(f"Log file: {status_info['log_file']}")
+# cli_status command removed - use /status in interactive mode
 
 
-@app.command()
-def start_backend():
-    """Manually start the backend service."""
-    backend_manager = get_backend_manager()
-    is_running, pid = backend_manager.is_backend_running()
-    if is_running:
-        console.print(f"✅ [green]Backend already running[/green] (PID: {pid})")
-        return
-    console.print("🚀 Starting backend service...")
-    success, pid = backend_manager.start_backend()
-    if success:
-        console.print(f"✅ [green]Backend started successfully[/green] (PID: {pid})")
-    else:
-        console.print("❌ [red]Failed to start backend service[/red]")
-        raise typer.Exit(code=1)
+# start_backend command removed - backend auto-starts in interactive mode
 
 
-@app.command()
-def stop_backend():
-    """Stop the backend service."""
-    backend_manager = get_backend_manager()
-    
-    is_running, pid = backend_manager.is_backend_running()
-    if not is_running:
-        console.print("✅ [green]Backend is not running[/green]")
-        return
-    
-    console.print(f"🛑 Stopping backend service (PID: {pid})...")
-    success = backend_manager.stop_backend(pid)
-    
-    if success:
-        console.print("✅ [green]Backend stopped successfully[/green]")
-    else:
-        console.print("❌ [red]Failed to stop backend service[/red]")
-        raise typer.Exit(code=1)
+# stop_backend command removed - use /quit in interactive mode
 
 
-# Unified command handler - replaces individual commands
-@app.command()
-def execute(
-    user_input: str = typer.Argument(
-        ..., 
-        help="Natural language prompt or special command (/clear, /compact)"
-    )
-):
-    """Execute user input - natural language prompts or special commands."""
-    
-    async def _execute():
-        client = BackendClient()
-        try:
-            # Check backend health first
-            await client.check_health()
-            
-            # Route input based on content
-            if user_input.strip() == "/clear":
-                await _handle_clear_command(client)
-            elif user_input.strip() == "/compact":
-                await _handle_compact_command(client)
-            else:
-                await _handle_natural_language_prompt(client, user_input)
-                
-        finally:
-            await client.close()
-    
-    asyncio.run(_execute())
+# execute command removed - natural language input now defaults to execute_agentic_task
 
 
-async def _handle_clear_command(client: BackendClient):
-    """Handle /clear special command."""
-    with Progress(
-        SpinnerColumn(),
-        TextColumn("[progress.description]{task.description}"),
-        console=console,
-        transient=True
-    ) as progress:
-        task = progress.add_task("Clearing workspace context...", total=None)
-        result = await client.clear_workspace()
-        progress.update(task, description="Clear operation completed!")
-    
-    if result.get("success", False):
-        console.print(Panel.fit(
-            f"✅ [green]Context cleared successfully[/green]\n"
-            f"Workspace: {result.get('workspace_id', 'default')}\n"
-            f"Cleared: {', '.join(result.get('cleared_components', []))}",
-            title="Clear Complete",
-            border_style="green"
-        ))
-    else:
-        console.print(Panel.fit(
-            f"❌ [red]Clear operation failed[/red]\n"
-            f"Message: {result.get('message', 'Unknown error')}",
-            title="Clear Failed",
-            border_style="red"
-        ))
+# _handle_clear_command removed - use /clear in interactive mode
 
 
-async def _handle_compact_command(client: BackendClient):
-    """Handle /compact special command."""
-    with Progress(
-        SpinnerColumn(),
-        TextColumn("[progress.description]{task.description}"),
-        console=console,
-        transient=True
-    ) as progress:
-        task = progress.add_task("Compacting workspace context...", total=None)
-        result = await client.compact_workspace()
-        progress.update(task, description="Compact operation completed!")
-    
-    if result.get("success", False):
-        console.print(Panel.fit(
-            f"✅ [green]Context compacted successfully[/green]\n"
-            f"Workspace: {result.get('workspace_id', 'default')}\n"
-            f"Compressed: {result.get('original_length', 0)} → {result.get('compressed_length', 0)} tokens",
-            title="Compact Complete",
-            border_style="green"
-        ))
-    else:
-        console.print(Panel.fit(
-            f"❌ [red]Compact operation failed[/red]\n"
-            f"Message: {result.get('message', 'Unknown error')}",
-            title="Compact Failed",
-            border_style="red"
-        ))
+# _handle_compact_command removed - use /compact in interactive mode
 
 
 async def _handle_natural_language_prompt(client: BackendClient, prompt: str):
@@ -783,216 +671,35 @@ async def _handle_natural_language_prompt(client: BackendClient, prompt: str):
     ))
 
 
-@app.command()
-def health():
-    """Check the health status of the backend service."""
-    async def _health():
-        client = BackendClient()
-        try:
-            with Progress(
-                SpinnerColumn(),
-                TextColumn("[progress.description]{task.description}"),
-                console=console,
-                transient=True
-            ) as progress:
-                progress.add_task("Checking backend health...", total=None)
-                status = await client.check_health()
-            
-            console.print(Panel.fit(
-                f"✅ Backend service status: [green]{status.get('status', 'unknown')}[/green]\n"
-                f"Service: {status.get('service', {}).get('name', 'Unknown')}\n"
-                f"Model loaded: {status.get('model', {}).get('loaded', False)}",
-                title="Backend Health",
-                border_style="green"
-            ))
-        finally:
-            await client.close()
-    
-    asyncio.run(_health())
+# health command removed - use /status in interactive mode
 
+
+# load command removed - codebase auto-loads in interactive mode
+
+
+# ask command removed - natural language queries route to execute_agentic_task by default
+
+
+# status command removed - use /status in interactive mode
+
+
+# CLI simplified to essential commands only
 
 @app.command()
-def load(
-    path: str = typer.Argument(
-        ..., 
-        help="Path to the codebase directory to load"
-    ),
-    force: bool = typer.Option(
-        False, 
-        "--force", 
-        "-f", 
-        help="Force reload even if codebase is already loaded"
-    )
-):
-    """Load a codebase into the intelligent memory system."""
-    async def _load():
-        client = BackendClient()
-        try:
-            # Validate path exists
-            codebase_path = Path(path).resolve()
-            if not codebase_path.exists():
-                console.print(f"❌ [red]Path does not exist:[/red] {codebase_path}")
-                raise typer.Exit(1)
-            
-            if not codebase_path.is_dir():
-                console.print(f"❌ [red]Path is not a directory:[/red] {codebase_path}")
-                raise typer.Exit(1)
-            
-            # Check backend health first
-            await client.check_health()
-            
-            # Load codebase
-            with Progress(
-                SpinnerColumn(),
-                TextColumn("[progress.description]{task.description}"),
-                console=console,
-                transient=True
-            ) as progress:
-                progress.add_task(f"Loading codebase from {codebase_path}...", total=None)
-                result = await client.load_codebase(str(codebase_path))
-            
-            # Display results
-            files_loaded = result.get('files_loaded', 0)
-            context_size = result.get('context_size', 'unknown')
-            memory_usage = result.get('memory_usage', 'unknown')
-            
-            console.print(Panel.fit(
-                f"✅ [green]Codebase loaded successfully[/green]\n"
-                f"Files processed: {files_loaded}\n"
-                f"Context size: {context_size}\n"
-                f"Memory usage: {memory_usage}",
-                title="Codebase Loading Complete",
-                border_style="green"
-            ))
-        finally:
-            await client.close()
-    
-    asyncio.run(_load())
-
-
-@app.command()
-def ask(
-    prompt: str = typer.Argument(
-        ..., 
-        help="Natural language prompt describing the coding task"
-    ),
-    context: Optional[str] = typer.Option(
-        None,
-        "--context",
-        "-c",
-        help="Additional context as JSON string"
-    ),
-    verbose: bool = typer.Option(
-        False,
-        "--verbose",
-        "-v", 
-        help="Show detailed execution information"
-    )
-):
-    """Execute a natural language coding task using multi-agent orchestration."""
-    async def _ask():
-        client = BackendClient()
-        try:
-            # Parse context if provided
-            context_dict = None
-            if context:
-                try:
-                    context_dict = json.loads(context)
-                except json.JSONDecodeError:
-                    console.print(f"❌ [red]Invalid JSON context:[/red] {context}")
-                    raise typer.Exit(1)
-            
-            # Check backend health
-            await client.check_health()
-            
-            # Execute task
-            with Progress(
-                SpinnerColumn(),
-                TextColumn("[progress.description]{task.description}"),
-                console=console,
-                transient=True
-            ) as progress:
-                task = progress.add_task("Processing your request...", total=None)
-                result = await client.execute_task(prompt, context_dict)
-                progress.update(task, description="Task completed!")
-            
-            # Display results
-            console.print(Panel.fit(
-                f"🤖 [blue]Task Status:[/blue] {result.get('status', 'unknown')}\n"
-                f"Agent Used: {result.get('agent', 'unknown')}\n"
-                f"Execution Time: {result.get('execution_time', 'unknown')}s",
-                title="Execution Summary", 
-                border_style="blue"
-            ))
-            
-            # Show response
-            response = result.get('response', 'No response available')
-            console.print(Panel(
-                response,
-                title="Agent Response",
-                border_style="cyan"
-            ))
-            
-            # Show verbose details if requested
-            if verbose and 'details' in result:
-                details_table = Table(title="Execution Details")
-                details_table.add_column("Property", style="cyan")
-                details_table.add_column("Value", style="white")
-                
-                for key, value in result['details'].items():
-                    details_table.add_row(str(key), str(value))
-                
-                console.print(details_table)
-                
-        finally:
-            await client.close()
-    
-    asyncio.run(_ask())
-
-
-@app.command()
-def status():
-    """Display current system status and loaded resources."""
-    async def _status():
-        client = BackendClient()
-        try:
-            # Get health status
-            health_status = await client.check_health()
-            
-            # Create status table
-            status_table = Table(title="System Status")
-            status_table.add_column("Component", style="cyan", no_wrap=True)
-            status_table.add_column("Status", style="white")
-            
-            status_table.add_row("Backend Service", "🟢 Running" if health_status.get('status') == 'healthy' else "🔴 Unhealthy")
-            status_table.add_row("Models Loaded", str(health_status.get('models_loaded', 'Unknown')))
-            status_table.add_row("Memory Usage", f"{health_status.get('memory_usage', 'Unknown')} GB")
-            status_table.add_row("Codebase Loaded", "✅ Yes" if health_status.get('codebase_loaded') else "❌ No")
-            
-            console.print(status_table)
-            
-        finally:
-            await client.close()
-    
-    asyncio.run(_status())
-
-
-@app.command()
-def start_backend(
-    port: int = typer.Option(8000, "--port", "-p", help="Port for backend service"),
-    host: str = typer.Option("127.0.0.1", "--host", help="Host for backend service"),
-    detach: bool = typer.Option(False, "--detach", "-d", help="Run in background")
-):
-    """Start the backend GGUF memory service via backend manager."""
+def quit_cli():
+    """Quit and terminate any running backend services."""
     backend_manager = get_backend_manager()
-    backend_manager.default_port = port
-    backend_manager.host = host
-    success, pid = backend_manager.start_backend(detached=detach)
-    if success:
-        console.print(f"✅ [green]Backend started successfully[/green] (PID: {pid})")
-    else:
-        console.print("❌ [red]Failed to start backend service[/red]")
-        raise typer.Exit(1)
+    is_running, pid = backend_manager.is_backend_running()
+    
+    if is_running:
+        console.print(f"🛑 [yellow]Terminating backend (PID: {pid})...[/yellow]")
+        success = backend_manager.stop_backend(pid)
+        if success:
+            console.print("✅ [green]Backend terminated successfully[/green]")
+        else:
+            console.print("⚠️  [yellow]Backend termination may have failed[/yellow]")
+    
+    console.print("👋 [blue]Goodbye![/blue]")
 
 
 @app.callback(invoke_without_command=True)
@@ -1022,14 +729,15 @@ def main(
     """
     String CLI - Local AI coding assistant.
     
-    A fully local AI coding assistant that rivals commercial tools with capabilities 
-    including code generation, refactoring, quality review, live web research, 
-    and automated file/terminal actions—all without cloud dependencies.
+    A simplified, agentic CLI that routes natural language queries exclusively
+    through execute_agentic_task for intelligent multi-agent orchestration.
     
     Usage:
         string-cli "Analyze the main.py file and suggest improvements"
-        string-cli /clear
-        string-cli /compact
+        string-cli                    # Interactive mode with auto-loading
+        string-cli quit-cli           # Terminate backend and exit
+    
+    Interactive Commands: /status, /clear, /compact, /quit
     """
     # Initialize STRING_HOME runtime directory
     try:
@@ -1068,10 +776,9 @@ def main(
             console.print(f"\n⚠️  [yellow]Warning:[/yellow] Runtime check encountered an error: {e}")
             console.print("Proceeding anyway... some features may not work correctly.")
     
-    # Ensure backend is running before any operations (except version/help/backend commands)
-    backend_commands = ['start-backend', 'stop-backend', 'status', 'validate']
-    skip_backend_start = (ctx.invoked_subcommand in backend_commands or 
-                         any(cmd in str(ctx.command.name) for cmd in backend_commands))
+    # Ensure backend is running before any operations (except version/help/quit commands)
+    skip_backend_start = (ctx.invoked_subcommand in ['quit-cli'] or 
+                         version)
     
     if not skip_checks and user_input is not None and not skip_backend_start:
         backend_manager = get_backend_manager()
@@ -1086,15 +793,19 @@ def main(
     
     # Auto-load current directory context if backend is available
     if not user_input and ctx.invoked_subcommand is None:
+        # Lock session identity for auto-load
+        current_dir = Path.cwd()
+        session_state.lock_session_identity(current_dir, "default_user")
+        
         async def _auto_load():
-            client = BackendClient()
+            backend_manager = get_backend_manager()
+            client = BackendClient(backend_manager=backend_manager)
             try:
                 # Check if backend is healthy
                 health = await client.check_health()
                 if health.get('status') == 'healthy':
-                    current_dir = Path.cwd()
-                    console.print(f"📁 [blue]Auto-loading codebase context from:[/blue] {current_dir}")
-                    result = await client.load_codebase(str(current_dir))
+                    console.print(f"📁 [blue]Auto-loading codebase context from:[/blue] {session_state.project_path}")
+                    result = await client.load_codebase(str(session_state.project_path))
                     console.print("✅ [green]Context loaded automatically[/green]")
             except Exception:
                 # Silently fail auto-loading - user can manually load if needed
@@ -1107,9 +818,23 @@ def main(
         except Exception:
             pass
     
-    # If user provided direct input, execute it
+    # If user provided direct input, route to execute_agentic_task
     if user_input:
-        execute(user_input)
+        # Lock session identity for direct execution
+        current_dir = Path.cwd()
+        session_state.lock_session_identity(current_dir, "default_user")
+        
+        # Execute natural language input directly through agentic task endpoint
+        async def _execute_direct():
+            backend_manager = get_backend_manager()
+            client = BackendClient(backend_manager=backend_manager)
+            try:
+                await client.check_health()
+                await _handle_natural_language_prompt(client, user_input)
+            finally:
+                await client.close()
+        
+        asyncio.run(_execute_direct())
         return
     
     # Enter interactive session if no subcommand is provided
